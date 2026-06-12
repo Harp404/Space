@@ -1,0 +1,118 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: astromesh-postgres
+    environment:
+      POSTGRES_DB: astromesh
+      POSTGRES_USER: astromesh
+      POSTGRES_PASSWORD: astromesh
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U astromesh -d astromesh"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - astromesh-net
+
+  node1:
+    build: .
+    container_name: astromesh-node1
+    environment:
+      NODE_ID: "1"
+      HTTP_PORT: "8081"
+      PEER_PORTS: "8082,8083,8084"
+      DB_URL: "postgres://astromesh:astromesh@postgres:5432/astromesh?sslmode=disable"
+      PEER_HOSTS: "node2,node3,node4"
+    ports:
+      - "8081:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - astromesh-net
+
+  node2:
+    build: .
+    container_name: astromesh-node2
+    environment:
+      NODE_ID: "2"
+      HTTP_PORT: "8082"
+      PEER_PORTS: "8081,8083,8084"
+      DB_URL: "postgres://astromesh:astromesh@postgres:5432/astromesh?sslmode=disable"
+      PEER_HOSTS: "node1,node3,node4"
+    ports:
+      - "8082:8082"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - astromesh-net
+
+  node3:
+    build: .
+    container_name: astromesh-node3
+    environment:
+      NODE_ID: "3"
+      HTTP_PORT: "8083"
+      PEER_PORTS: "8081,8082,8084"
+      DB_URL: "postgres://astromesh:astromesh@postgres:5432/astromesh?sslmode=disable"
+      PEER_HOSTS: "node1,node2,node4"
+    ports:
+      - "8083:8083"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - astromesh-net
+
+  node4:
+    build: .
+    container_name: astromesh-node4
+    environment:
+      NODE_ID: "4"
+      HTTP_PORT: "8084"
+      PEER_PORTS: "8081,8082,8083"
+      DB_URL: "postgres://astromesh:astromesh@postgres:5432/astromesh?sslmode=disable"
+      PEER_HOSTS: "node1,node2,node3"
+    ports:
+      - "8084:8084"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - astromesh-net
+
+  middleware:
+    build: .
+    container_name: astromesh-middleware
+    environment:
+      NODE_ID: "0"
+      HTTP_PORT: "8090"
+      PEER_PORTS: "8081,8082,8083,8084"
+      DB_URL: "postgres://astromesh:astromesh@postgres:5432/astromesh?sslmode=disable"
+      PEER_HOSTS: "node1,node2,node3,node4"
+    ports:
+      - "8090:8090"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - astromesh-net
+
+networks:
+  astromesh-net:
+    driver: bridge
+
+volumes:
+  pgdata:
