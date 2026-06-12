@@ -419,15 +419,28 @@ function satPosition(sat, time) {
   return undefined
 }
 
+// Pick the 3D model for a satellite by its type. Falls back to the existing
+// generic payload model (which also serves imaging/EO sats).
+const GENERIC_MODEL = '/models/satellite_pbr_v3.glb'
+function modelForSat(sat) {
+  switch (groupOf(sat)) {
+    case 'stations': return '/models/types/station.glb'
+    case 'starlink':
+    case 'oneweb':   return '/models/types/comms.glb'
+    case 'debris':   return '/models/types/debris.glb'
+    default:         return GENERIC_MODEL   // imaging / other payloads
+  }
+}
+
 function makeSatEntity(sat) {
   const posProp = new Cesium.CallbackPositionProperty(
     (time) => satPosition(sat, time), false)
   const isAlert = sat.risk_score >= 70
   const entity = viewer.entities.add({
     position: posProp,
-    // Real 3D satellite model — shown only when the camera is within ~2500 km.
+    // Real 3D satellite model, chosen by type — shown only within ~2500 km.
     model: {
-      uri: '/models/satellite_pbr_v3.glb',
+      uri: modelForSat(sat),
       minimumPixelSize: isAlert ? 44 : 36,
       maximumScale: 80000,
       scale: 4000,
