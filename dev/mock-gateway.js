@@ -11,9 +11,24 @@
 const http = require('http');
 const https = require('https');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const { URL } = require('url');
 
 const PORT = 8090;
+
+// ---------------------------------------------------------------------------
+// Minimal .env loader (no deps) — loads repo-root .env into process.env
+// ---------------------------------------------------------------------------
+(function loadEnv() {
+  try {
+    const txt = fs.readFileSync(path.join(__dirname, '..', '.env'), 'utf8');
+    for (const line of txt.split('\n')) {
+      const m = line.match(/^\s*([A-Za-z0-9_]+)\s*=\s*(.*)\s*$/);
+      if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '').trim();
+    }
+  } catch { /* no .env — fine */ }
+})();
 
 // ---------------------------------------------------------------------------
 // State
@@ -410,6 +425,71 @@ function fetchTLE(group) {
 }
 
 // ---------------------------------------------------------------------------
+// Space-Track catalogue middleware
+// Server-side proxy: logs into Space-Track with env creds, pulls the FULL
+// on-orbit catalogue (~31k objects), caches it on disk, refreshes daily.
+// The browser only ever talks to /api/catalogue — never sees credentials.
+// Space-Track limits: <30 req/min, <300 req/hour → we do ~1 req/DAY.
+// ---------------------------------------------------------------------------
+const ST_IDENTITY = process.env.SPACETRACK_IDENTITY || '';
+const ST_PASSWORD = process.env.SPACETRACK_PASSWORD || '';
+const ST_QUERY = '/basicspacedata/query/class/gp/decay_date/null-val/epoch/%3Enow-30/orderby/norad_cat_id/format/3le';
+const CACHE_DIR = path.join(__dirname, 'cache');
+const CATALOGUE_FILE = path.join(CACHE_DIR, 'catalogue.3le');
+const CATALOGUE_TTL_MS = 6 * 3600 * 1000;    // refresh every 6h (matches Space-Track's update cadence; well under rate limits)
+let catalogueFetching = false;
+
+function httpsRequest(options, body) {
+  return new Promise((resolve, reject) => {
+    const r = https.request(options, (resp) => {
+      let data = '';
+      resp.on('data', (c) => (data += c));
+      resp.on('end', () => resolve({ status: resp.statusCode, headers: resp.headers, body: data }));
+    });
+    r.on('error', reject);
+    if (body) r.write(body);
+    r.end();
+  });
+}
+
+async function fetchCatalogueFromSpaceTrack() {
+  if (!ST_IDENTITY || !ST_PASSWORD) throw new Error('SPACETRACK_IDENTITY / SPACETRACK_PASSWORD not set in .env');
+  const loginBody = `identity=${encodeURIComponent(ST_IDENTITY)}&password=${encodeURIComponent(ST_PASSWORD)}`;
+  const login = await httpsRequest({
+    hostname: 'www.space-track.org', path: '/ajaxauth/login', method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(loginBody) },
+  }, loginBody);
+  const cookies = (login.headers['set-cookie'] || []).map((c) => c.split(';')[0]).join('; ');
+  if (login.status !== 200 || !cookies) throw new Error('Space-Track login failed (' + login.status + ')');
+  const cat = await httpsRequest({
+    hostname: 'www.space-track.org', path: ST_QUERY, method: 'GET', headers: { Cookie: cookies },
+  });
+  if (cat.status !== 200 || cat.body.length < 5000) throw new Error('Space-Track catalogue query failed (' + cat.status + ')');
+  return cat.body;
+}
+
+// Returns the catalogue text — from fresh disk cache, else fetches + caches.
+async function getCatalogue() {
+  try {
+    const st = fs.statSync(CATALOGUE_FILE);
+    if (Date.now() - st.mtimeMs < CATALOGUE_TTL_MS) return fs.readFileSync(CATALOGUE_FILE, 'utf8');
+  } catch { /* missing — fetch below */ }
+  if (catalogueFetching) {                       // a fetch is in-flight: serve stale if we have it
+    try { return fs.readFileSync(CATALOGUE_FILE, 'utf8'); } catch { throw new Error('catalogue warming up'); }
+  }
+  catalogueFetching = true;
+  try {
+    const data = await fetchCatalogueFromSpaceTrack();
+    try { fs.mkdirSync(CACHE_DIR, { recursive: true }); } catch {}
+    fs.writeFileSync(CATALOGUE_FILE, data);
+    console.log(`[Catalogue] fetched ${Math.round(data.length / 3) | 0} lines (~${Math.round(data.split('\n').length / 3)} objects) from Space-Track`);
+    return data;
+  } finally {
+    catalogueFetching = false;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
 
@@ -458,6 +538,19 @@ async function handleRequest(req, res) {
     cors(res);
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end(tleData);
+    return;
+  }
+
+  // Full ~31k object catalogue (Space-Track, cached daily). Browser never sees creds.
+  if (method === 'GET' && path === '/api/catalogue') {
+    try {
+      const data = await getCatalogue();
+      cors(res);
+      res.writeHead(200, { 'Content-Type': 'text/plain' });
+      res.end(data);
+    } catch (e) {
+      json(res, 502, { error: 'catalogue unavailable', detail: e.message });
+    }
     return;
   }
 
@@ -582,6 +675,17 @@ server.listen(PORT, () => {
   console.log(`  Node stop:        POST /control/node/:id/stop`);
   console.log(`  Node start:       POST /control/node/:id/start`);
   console.log(`  Reset:            POST /reset`);
+  console.log(`  Catalogue:        GET  /api/catalogue   (~31k objects, Space-Track)`);
   console.log(`  Health:           GET  /health`);
   console.log(`\nLeader: Node ${leaderId} (Bully — highest online ID)\n`);
+  // Warm the catalogue cache in the background (non-blocking) so the first
+  // "Show all" toggle is instant.
+  if (ST_IDENTITY && ST_PASSWORD) {
+    getCatalogue().then(
+      () => console.log('[Catalogue] cache ready'),
+      (e) => console.log('[Catalogue] warm-up skipped:', e.message),
+    );
+  } else {
+    console.log('[Catalogue] Space-Track creds not set — /api/catalogue disabled');
+  }
 });

@@ -42,6 +42,18 @@
         <span class="fp-label">⚠ Dangerous only</span>
         <span class="fp-count">≥70</span>
       </label>
+      <div class="fp-sep"></div>
+      <label class="fp-row allobj">
+        <input type="checkbox" v-model="showAll" />
+        <span class="fp-label">🛰 Show all tracked objects</span>
+        <span class="fp-count">{{ catalogueLoading ? '…' : (catalogueCount || '~31k') }}</span>
+      </label>
+      <div v-if="showAll" class="fp-hint">Live cloud of every active satellite + major debris fields.</div>
+      <label v-if="showAll" class="fp-row models">
+        <span class="fp-label">3D models (nearest)</span>
+        <input class="fp-num" type="number" min="0" max="2000" step="25" v-model.number="NEAREST_MODELS" />
+      </label>
+      <div v-if="showAll" class="fp-hint">Higher = prettier but heavier. Past a few hundred it will choke.</div>
     </div>
 
     <button v-if="trackedSat" class="return-btn" @click="stopTracking">
@@ -74,7 +86,7 @@
 // ──────────────────────────────────────────────────────────────────────────
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import * as Cesium from 'cesium'
-import { loadGroupForNorads, loadByNorad, hasRealOrbit, realLatLng } from '../lib/realOrbit.js'
+import { loadGroupForNorads, loadByNorad, hasRealOrbit, realLatLng, loadCatalogue, loadFullCatalogue, ecefAt, gmstOf, periodMinutes, orbitEciKm, eciKmToEcefMeters } from '../lib/realOrbit.js'
 
 // Same props/emits as the old component so App.vue needs no changes.
 const props = defineProps({
@@ -206,25 +218,35 @@ onMounted(() => {
   clickHandler = new Cesium.ScreenSpaceEventHandler(scene.canvas)
   clickHandler.setInputAction((click) => {
     const picked = scene.pick(click.position)
-    const sat = picked && picked.id && picked.id._satData
-    if (sat) trackSat(sat)
+    const id = picked && picked.id
+    if (id && id._satData) { trackSat(id._satData); return }       // curated satellite
+    if (id && id._catNorad) { trackCatalogueObject(id._catNorad, id._catName); return }  // a cloud MODEL
+    if (id && id._catalogue) { trackCatalogueObject(id.norad, id.name); return }  // a cloud point
   }, Cesium.ScreenSpaceEventType.LEFT_CLICK)
 
   // Hidden camera-target point: the camera tracks THIS (a clean centred point at
   // a damped position), not the model — so the handoff has no off-centre snap and
   // per-frame satellite jitter is filtered out of the camera.
+  camFallbackPos = new Cesium.CallbackPositionProperty(
+    () => (smoothPos ? smoothPos.clone() : CAM_TARGET_FALLBACK), false)
   camTargetEntity = viewer.entities.add({
-    position: new Cesium.CallbackPositionProperty(
-      () => (smoothPos ? smoothPos.clone() : CAM_TARGET_FALLBACK), false),
+    position: camFallbackPos,
     point: { pixelSize: 1, color: Cesium.Color.TRANSPARENT },
   })
 
   // Per frame: damp the camera target toward the real satellite (filters jitter).
   scene.postRender.addEventListener(() => {
-    if (trackedReal && smoothPos) {
-      const real = trackedReal.position.getValue(viewer.clock.currentTime)
-      if (real) Cesium.Cartesian3.lerp(smoothPos, real, 0.12, smoothPos)
+    if (!trackedReal || !smoothPos) return
+    // Read the tracked object's position via ecefAt (same proven path that
+    // moves the cloud) so the follow can't freeze on cloud/catalogue objects.
+    let real
+    const nid = trackedSat.value && trackedSat.value.norad_id
+    if (nid && hasRealOrbit(nid)) {
+      const e = ecefAt(nid, Cesium.JulianDate.toDate(viewer.clock.currentTime))
+      if (e) real = new Cesium.Cartesian3(e.x, e.y, e.z)
     }
+    if (!real) real = trackedReal.position.getValue(viewer.clock.currentTime)
+    if (real) Cesium.Cartesian3.lerp(smoothPos, real, 0.12, smoothPos)
   })
 
   // ── Satellites ────────────────────────────────────────────────────────────
@@ -393,9 +415,61 @@ let tleLoaded = false
 // position is `smoothPos` — a damped position trailing the real satellite. Tracking
 // a damped centered point (not the off-centre model) removes the per-frame jitter.
 let camTargetEntity = null
+let camFallbackPos = null        // the CallbackPositionProperty used when not tracking
 let smoothPos = null            // damped position trailing the tracked satellite
 let trackedReal = null          // the real satellite entity being followed
 const CAM_TARGET_FALLBACK = Cesium.Cartesian3.fromDegrees(0, 0, 40_000_000)
+
+// Camera offset used both for the fly-in target AND while tracking, so the
+// fly-in lands EXACTLY where tracking begins (no side-snap at handoff).
+const TRACK_VIEW_FROM = new Cesium.Cartesian3(0, -600_000, 320_000)
+
+// The exact camera pose Cesium's tracker will impose: it builds the frame from
+// position + velocity (rotationMatrixFromPositionVelocity: x=velocity, y=right,
+// z=up) and places the camera at frame·viewFrom looking at the object. We fly
+// the camera to that same pose so the handoff is seamless. null if no velocity.
+function trackingPose(sat, leadMs = 0) {
+  const nid = sat.norad_id
+  if (!nid || !hasRealOrbit(nid)) return null
+  // Aim at where the object WILL be after leadMs (the fly-in duration) so the
+  // camera and the tracker agree at the handoff instant → no snap.
+  const jd = new Date(Cesium.JulianDate.toDate(viewer.clock.currentTime).getTime() + leadMs)
+  const e0 = ecefAt(nid, jd)
+  const ep = ecefAt(nid, new Date(jd.getTime() + 2000))
+  const em = ecefAt(nid, new Date(jd.getTime() - 2000))
+  if (!e0 || !ep || !em) return null
+  const pos = new Cesium.Cartesian3(e0.x, e0.y, e0.z)
+  let vel = new Cesium.Cartesian3((ep.x - em.x) / 4, (ep.y - em.y) / 4, (ep.z - em.z) / 4)
+  if (Cesium.Cartesian3.magnitude(vel) < 1) return null
+  vel = Cesium.Cartesian3.normalize(vel, vel)
+  const rot = Cesium.Transforms.rotationMatrixFromPositionVelocity(pos, vel, Cesium.Ellipsoid.WGS84, new Cesium.Matrix3())
+  const off = Cesium.Matrix3.multiplyByVector(rot, TRACK_VIEW_FROM, new Cesium.Cartesian3())
+  const dest = Cesium.Cartesian3.add(pos, off, new Cesium.Cartesian3())
+  const dir = Cesium.Cartesian3.normalize(Cesium.Cartesian3.subtract(pos, dest, new Cesium.Cartesian3()), new Cesium.Cartesian3())
+  const up = Cesium.Matrix3.getColumn(rot, 2, new Cesium.Cartesian3())
+  return { dest, dir, up }
+}
+
+// Time-interpolated orbit samples for SMOOTH camera tracking. Cesium's
+// EntityView interpolates these (and uses the VVLH frame for fast objects),
+// which is far steadier than a per-frame lerp that wobbles when FPS varies.
+function buildSampledOrbit(norad) {
+  const prop = new Cesium.SampledPositionProperty()
+  prop.setInterpolationOptions({
+    interpolationDegree: 5,
+    interpolationAlgorithm: Cesium.LagrangePolynomialApproximation,
+  })
+  const now = viewer.clock.currentTime
+  const periodMin = periodMinutes(norad) || 95
+  const totalS = periodMin * 60 * 2          // ~2 orbits of samples
+  const stepS = Math.max(4, totalS / 360)
+  for (let s = -2 * stepS; s <= totalS; s += stepS) {
+    const t = Cesium.JulianDate.addSeconds(now, s, new Cesium.JulianDate())
+    const e = ecefAt(norad, Cesium.JulianDate.toDate(t))
+    if (e) prop.addSample(t, new Cesium.Cartesian3(e.x, e.y, e.z))
+  }
+  return prop
+}
 
 // Map a 0-100 risk score to a colour (green → amber → red).
 function riskColor(score) {
@@ -439,11 +513,12 @@ function makeSatEntity(sat) {
   const entity = viewer.entities.add({
     position: posProp,
     // Real 3D satellite model, chosen by type — shown only within ~2500 km.
+    // Catalogue objects match the cloud model size so clicking doesn't resize it.
     model: {
       uri: modelForSat(sat),
-      minimumPixelSize: isAlert ? 44 : 36,
-      maximumScale: 80000,
-      scale: 4000,
+      minimumPixelSize: sat._catalogue ? 13 : (isAlert ? 26 : 22),
+      maximumScale: sat._catalogue ? 5000 : 16000,
+      scale: sat._catalogue ? 350 : 1500,
       colorBlendMode: Cesium.ColorBlendMode.HIGHLIGHT,
       distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0.0, 2_500_000),
     },
@@ -538,6 +613,144 @@ const GROUPS = [
 const enabled = reactive({ stations: true, starlink: true, oneweb: true, debris: true, other: true })
 const dangerousOnly = ref(false)
 
+// ── Full catalogue cloud (~all tracked objects as cheap points) ────────────
+// Off by default (a clean ~20 curated view). Toggle ON to reveal the real
+// orbital clutter — every active satellite + major debris fields, live.
+const showAll = ref(false)
+const catalogueCount = ref(0)
+const catalogueLoading = ref(false)
+const CATALOGUE_GROUPS = ['active', 'cosmos-2251-debris', 'iridium-33-debris', '1999-025', 'cosmos-1408-debris']
+let cataloguePoints = null     // Cesium.PointPrimitiveCollection
+let catalogueItems = []        // [{ norad, p }]
+let catalogueTimer = null
+let catalogueLoaded = false
+
+// How many of the nearest-to-camera objects get a real 3D model (rest = points).
+// Crank this up to "try" more models — past a few hundred it WILL choke (which
+// is the whole reason the cloud is points, not models).
+const NEAREST_MODELS = ref(25)
+const modelCloud = new Map()   // norad → Cesium.Entity (the nearest-N models)
+
+async function ensureCatalogue() {
+  if (catalogueLoaded || catalogueLoading.value) return
+  catalogueLoading.value = true
+  // Full ~31k catalogue via the gateway (Space-Track); fall back to CelesTrak.
+  let list = await loadFullCatalogue()
+  if (!list.length) list = await loadCatalogue(CATALOGUE_GROUPS)
+  const seedNorads = new Set(props.satellites.map(s => s.norad_id))
+  cataloguePoints = viewer.scene.primitives.add(new Cesium.PointPrimitiveCollection())
+  const active = Cesium.Color.fromCssColorString('#9fd4ff').withAlpha(0.9)
+  const debris = Cesium.Color.fromCssColorString('#ff8a5c').withAlpha(0.9)
+  for (const o of list) {
+    if (seedNorads.has(o.norad)) continue          // already a curated entity
+    const p = cataloguePoints.add({
+      position: Cesium.Cartesian3.ZERO,
+      pixelSize: 3,
+      color: o.debris ? debris : active,
+      outlineColor: Cesium.Color.WHITE.withAlpha(0.35),
+      outlineWidth: 1,
+      // id makes the point pickable/clickable like the curated satellites.
+      id: { norad: o.norad, name: o.name, _catalogue: true },
+    })
+    catalogueItems.push({ norad: o.norad, p, debris: o.debris, name: o.name })
+  }
+  cataloguePoints.show = false
+  catalogueCount.value = catalogueItems.length
+  catalogueLoaded = true
+  catalogueLoading.value = false
+  updateCatalogue()
+}
+
+// Position update for the cloud, CHUNKED across frames so 31k propagations
+// never hitch in one tick (which was starving the camera follow). Each call
+// advances ~1/4 of the cloud; a full refresh completes ~4× per second.
+let catalogueChunk = 0
+const CATALOGUE_CHUNKS = 4
+function updateCatalogue() {
+  if (!cataloguePoints) return
+  const jsDate = Cesium.JulianDate.toDate(viewer.clock.currentTime)
+  const g = gmstOf(jsDate)
+  const n = catalogueItems.length
+  const per = Math.ceil(n / CATALOGUE_CHUNKS)
+  const start = catalogueChunk * per
+  const end = Math.min(start + per, n)
+  for (let i = start; i < end; i++) {
+    const it = catalogueItems[i]
+    const e = ecefAt(it.norad, jsDate, g)
+    if (e) { it.p.position = new Cesium.Cartesian3(e.x, e.y, e.z); it.valid = true }
+    else { it.valid = false; it.p.show = false }
+  }
+  catalogueChunk = (catalogueChunk + 1) % CATALOGUE_CHUNKS
+  if (catalogueChunk === 0) updateNearestModels()   // once per full cycle
+}
+
+// Give the N objects closest to the camera a real 3D model; points elsewhere.
+function updateNearestModels() {
+  const N = NEAREST_MODELS.value
+  const camPos = viewer.camera.positionWC
+  // The tracked object is represented by its own entity — exclude it from the
+  // cloud's models AND points so there's no duplicate (which looked "bigger").
+  const trackedN = trackedSat.value?.norad_id
+  const ranked = catalogueItems
+    .filter(it => it.valid && it.norad !== trackedN)
+    .map(it => ({ it, d: Cesium.Cartesian3.distanceSquared(camPos, it.p.position) }))
+    .sort((a, b) => a.d - b.d)
+    .slice(0, N)
+  const modelSet = new Set(ranked.map(r => r.it.norad))
+  // Models: keep exactly modelSet.
+  for (const [norad, ent] of modelCloud) {
+    if (!modelSet.has(norad)) { viewer.entities.remove(ent); modelCloud.delete(norad) }
+  }
+  // Point visibility: a point shows only if valid, NOT a model, and NOT tracked.
+  for (const it of catalogueItems) {
+    it.p.show = it.valid && !modelSet.has(it.norad) && it.norad !== trackedN
+  }
+  // Add models for newly-nearest objects.
+  for (const { it } of ranked) {
+    if (!modelCloud.has(it.norad)) {
+      const ent = viewer.entities.add({
+        position: new Cesium.CallbackPositionProperty((time) => {
+          const e = ecefAt(it.norad, Cesium.JulianDate.toDate(time))
+          return e ? new Cesium.Cartesian3(e.x, e.y, e.z) : undefined
+        }, false),
+        model: {
+          uri: it.debris ? '/models/types/debris.glb' : GENERIC_MODEL,
+          // Smaller world-scale so dense objects don't visibly cross through each
+          // other up close; minimumPixelSize keeps them visible when zoomed out.
+          minimumPixelSize: 13,
+          maximumScale: 5000,
+          scale: 350,
+        },
+      })
+      ent._catNorad = it.norad     // makes the MODEL clickable → tracks that object
+      ent._catName = it.name
+      modelCloud.set(it.norad, ent)
+    }
+  }
+}
+
+function clearModelCloud() {
+  for (const ent of modelCloud.values()) viewer.entities.remove(ent)
+  modelCloud.clear()
+}
+
+watch(showAll, async (on) => {
+  if (on) {
+    await ensureCatalogue()
+    if (cataloguePoints) cataloguePoints.show = true
+    if (catalogueTimer) clearInterval(catalogueTimer)
+    catalogueTimer = setInterval(updateCatalogue, 250)   // 1/4 each tick → full refresh ~1 Hz, no big hitch
+  } else {
+    if (cataloguePoints) cataloguePoints.show = false
+    if (catalogueTimer) { clearInterval(catalogueTimer); catalogueTimer = null }
+    clearModelCloud()
+  }
+})
+// Re-evaluate the model set immediately when the count, or the tracked object,
+// changes (so the tracked object's duplicate cloud model/point clears at once).
+watch(NEAREST_MODELS, () => { if (showAll.value) updateNearestModels() })
+watch(trackedSat, () => { if (showAll.value && cataloguePoints) updateNearestModels() })
+
 // Classify a satellite into one of the filter groups.
 function groupOf(sat) {
   const op = (sat.operator || '').toUpperCase()
@@ -567,6 +780,19 @@ function applyFilters() {
 watch([enabled, dangerousOnly], applyFilters, { deep: true })
 function selectResult(sat) {
   searchQuery.value = ''
+  ensureSatEntity(sat)
+  trackSat(sat)
+}
+// Click any object in the full cloud → make it a trackable entity and follow it.
+function trackCatalogueObject(norad, name) {
+  const sat = {
+    id: 100000 + norad,
+    norad_id: norad,
+    name: name || ('NORAD ' + norad),
+    operator: 'CATALOGUED',
+    risk_score: 0,
+    _catalogue: true,
+  }
   ensureSatEntity(sat)
   trackSat(sat)
 }
@@ -606,19 +832,23 @@ function showOrbit(sat) {
 function drawOrbit(sat) {
   if (orbitEntity) { viewer.entities.remove(orbitEntity); orbitEntity = null }
   if (!hasRealOrbit(sat.norad_id)) return     // need a real orbit to trace
-  const alt = sat.alt_km || 550
-  const periodS = 2 * Math.PI * Math.sqrt(Math.pow(RE + alt, 3) / MU)
-  const pts = []
-  const baseMs = Date.now() - 0.1 * periodS * 1000   // start ~10% before now
-  const N = 240
-  for (let i = 0; i <= N; i++) {
-    const ll = realLatLng(sat.norad_id, new Date(baseMs + (i / N) * periodS * 1000))
-    if (ll) pts.push(Cesium.Cartesian3.fromDegrees(ll.lng, ll.lat, ll.altitude))
-  }
-  if (pts.length < 2) return
+  // Sample the INERTIAL orbit ellipse once; render it rotated into the current
+  // Earth-fixed frame each frame. Proper ring for ANY orbit (GEO = circle), and
+  // the satellite always sits on it (no Earth-rotation warp / figure-8).
+  const jsDate = Cesium.JulianDate.toDate(viewer.clock.currentTime)
+  const eci = orbitEciKm(sat.norad_id, jsDate, 240)
+  if (eci.length < 2) return
   orbitEntity = viewer.entities.add({
     polyline: {
-      positions: pts,
+      positions: new Cesium.CallbackProperty((time) => {
+        const gmst = gmstOf(Cesium.JulianDate.toDate(time))
+        const arr = []
+        for (const p of eci) {
+          const e = eciKmToEcefMeters(p, gmst)
+          arr.push(new Cesium.Cartesian3(e.x, e.y, e.z))
+        }
+        return arr
+      }, false),
       width: 1.8,
       arcType: Cesium.ArcType.NONE,
       material: new Cesium.PolylineGlowMaterialProperty({
@@ -659,6 +889,18 @@ function stopInfoUpdates() {
 
 // Fly in to a satellite and follow it as it orbits. Cesium's trackedEntity
 // smoothly flies the camera in (no snap) and then keeps it locked on.
+// Current Earth-fixed position of a satellite via the proven ecefAt path
+// (same one that moves the cloud); falls back to the entity's own position.
+function livePos(sat) {
+  const nid = sat && sat.norad_id
+  if (nid && hasRealOrbit(nid)) {
+    const e = ecefAt(nid, Cesium.JulianDate.toDate(viewer.clock.currentTime))
+    if (e) return new Cesium.Cartesian3(e.x, e.y, e.z)
+  }
+  const ent = satEntities.get(sat.id)
+  return ent ? ent.position.getValue(viewer.clock.currentTime) : undefined
+}
+
 function trackSat(sat) {
   const entity = satEntities.get(sat.id)
   if (!entity) return
@@ -671,55 +913,39 @@ function trackSat(sat) {
   viewer.trackedEntity = undefined
   viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY)
 
-  // Seed the damped target at the satellite, fly the camera to the TARGET (clean
-  // centred point), then bridge to the exact tracked pose and attach tracking.
-  const p0 = entity.position.getValue(viewer.clock.currentTime)
+  const p0 = livePos(sat) || entity.position.getValue(viewer.clock.currentTime)
   smoothPos = p0 ? p0.clone() : null
   trackedReal = entity
-  viewer.flyTo(camTargetEntity, {
-    duration: 2.4,
-    offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-28), 600_000),
-  }).then(() => {
-    if (!viewer || viewer.isDestroyed() || !smoothPos || trackedSat.value !== sat) return
-    // Bridge: rotate from the fly-in-end pose to the EXACT pose trackedEntity will
-    // impose, THEN attach — so the handoff has no sudden orientation jump.
-    const enu = Cesium.Transforms.eastNorthUpToFixedFrame(smoothPos)
-    const invEnu = Cesium.Matrix4.inverse(enu, new Cesium.Matrix4())
-    const camPos = viewer.camera.positionWC.clone()
-    const local = Cesium.Matrix4.multiplyByPoint(invEnu, camPos, new Cesium.Cartesian3())
-    const viewFrom = (Cesium.Cartesian3.magnitude(local) > 50_000)
-      ? local : new Cesium.Cartesian3(0, -600_000, 320_000)
 
-    const dir = Cesium.Cartesian3.normalize(
-      Cesium.Cartesian3.subtract(smoothPos, camPos, new Cesium.Cartesian3()), new Cesium.Cartesian3())
-    const upCol = Cesium.Matrix4.getColumn(enu, 2, new Cesium.Cartesian4())
-    let up = new Cesium.Cartesian3(upCol.x, upCol.y, upCol.z)
-    const proj = Cesium.Cartesian3.multiplyByScalar(dir, Cesium.Cartesian3.dot(up, dir), new Cesium.Cartesian3())
-    up = Cesium.Cartesian3.subtract(up, proj, new Cesium.Cartesian3())
+  // Attach native tracking of the clean point via an interpolated
+  // SampledPositionProperty (steady, FPS-independent). Reliable for ANY object.
+  const attach = () => {
+    if (!viewer || viewer.isDestroyed() || trackedSat.value?.id !== sat.id) return
+    const nid = sat.norad_id
+    camTargetEntity.position = (nid && hasRealOrbit(nid)) ? buildSampledOrbit(nid) : camFallbackPos
+    camTargetEntity.viewFrom = TRACK_VIEW_FROM
+    viewer.trackedEntity = camTargetEntity
+  }
 
-    const attach = () => {
-      if (!viewer || viewer.isDestroyed()) return
-      camTargetEntity.viewFrom = viewFrom
-      viewer.trackedEntity = camTargetEntity
-    }
-    if (Cesium.Cartesian3.magnitude(up) > 1e-3 && Cesium.Cartesian3.magnitude(dir) > 1e-6) {
-      up = Cesium.Cartesian3.normalize(up, new Cesium.Cartesian3())
-      viewer.camera.flyTo({
-        destination: camPos,
-        orientation: { direction: dir, up },
-        duration: 0.7,
-        complete: attach,
-      })
-    } else {
-      attach()
-    }
-  }).catch(() => {})
+  // Fly the camera to the EXACT pose the tracker will impose at the moment the
+  // fly-in ends (lead-time predicted), THEN attach — seamless, no snap.
+  const FLY_MS = 1800
+  const pose = trackingPose(sat, FLY_MS)
+  if (!smoothPos || !pose) { attach(); return }
+  viewer.camera.flyTo({
+    destination: pose.dest,
+    orientation: { direction: pose.dir, up: pose.up },
+    duration: FLY_MS / 1000,
+    complete: attach,
+    cancel: attach,   // attach even if interrupted
+  })
 }
 
 // Return button: release the lock and fly back to the full-Earth overview.
 function stopTracking() {
   clearOrbit()
   stopInfoUpdates()
+  if (camFallbackPos) camTargetEntity.position = camFallbackPos   // reset for next track
   viewer.trackedEntity = undefined
   viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY)
   trackedReal = null
@@ -736,6 +962,7 @@ onUnmounted(() => {
   if (cloudTimer) clearInterval(cloudTimer)
   if (orbitTimer) clearInterval(orbitTimer)
   if (infoTimer) clearInterval(infoTimer)
+  if (catalogueTimer) clearInterval(catalogueTimer)
   if (clickHandler && !clickHandler.isDestroyed()) clickHandler.destroy()
   if (viewer && !viewer.isDestroyed()) viewer.destroy()
   viewer = null
@@ -922,4 +1149,16 @@ onUnmounted(() => {
 .fp-count { color: #5f7e9f; font-size: 11px; }
 .fp-sep { height: 1px; background: #1e3a5f; margin: 10px 0; }
 .fp-row.danger { color: #ffb86b; }
+.fp-row.allobj { color: #9fd4ff; }
+.fp-hint { color: #5f7e9f; font-size: 10px; line-height: 1.3; margin-top: 4px; }
+.fp-row.models { color: #cfe6ff; }
+.fp-num {
+  width: 64px;
+  padding: 3px 6px;
+  background: rgba(8, 14, 24, 0.9);
+  border: 1px solid #2b6cb0;
+  border-radius: 4px;
+  color: #e8f1ff;
+  font: 12px ui-monospace, monospace;
+}
 </style>

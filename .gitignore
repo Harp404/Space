@@ -30,6 +30,9 @@ astromesh
 # ── Local TLE snapshot (we fetch live from CelesTrak; not bundled) ──
 frontend/public/tle/
 
+# ── Server-side catalogue cache (fetched from Space-Track, refreshed daily) ──
+dev/cache/
+
 # ── Logs ──
 *.log
 npm-debug.log*

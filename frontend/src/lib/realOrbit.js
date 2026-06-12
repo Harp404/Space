@@ -188,3 +188,118 @@ export function realLatLng(noradId, jsDate) {
     altitude: geo.height * 1000,   // km → m
   }
 }
+
+// Fast Earth-fixed (ECEF) position in METRES for one object. Cheaper than
+// realLatLng (no geodetic round-trip) — used for the big 30k points cloud.
+// Pass a precomputed gmst to avoid recomputing it per object in bulk loops.
+export function ecefAt(noradId, jsDate, gmst) {
+  const rec = satrecMap.get(noradId)
+  if (!rec) return null
+  const pv = satellite.propagate(rec, jsDate)
+  if (!pv || !pv.position) return null
+  const g = gmst ?? satellite.gstime(jsDate)
+  const ecf = satellite.eciToEcf(pv.position, g)   // km, ECEF
+  return { x: ecf.x * 1000, y: ecf.y * 1000, z: ecf.z * 1000 }
+}
+export function gmstOf(jsDate) { return satellite.gstime(jsDate) }
+
+// Real orbital period (minutes) from the satrec's mean motion. Works for ANY
+// orbit (LEO/GEO/eccentric) — unlike guessing from a single altitude.
+export function periodMinutes(noradId) {
+  const rec = satrecMap.get(noradId)
+  if (!rec || !rec.no) return null
+  return (2 * Math.PI) / rec.no   // satrec.no is rad/min
+}
+
+// The orbit as INERTIAL (ECI) points in km over one period, sampled starting
+// ~10% before `jsDate`. Drawing these rotated by the *current* gmst each frame
+// gives a proper orbit ring (circle for GEO, ellipse for LEO) that the
+// satellite always sits on — unlike the Earth-fixed path which warps GEO into
+// a figure-8. Returns [{x,y,z}] (ECI km).
+export function orbitEciKm(noradId, jsDate, n = 240) {
+  const rec = satrecMap.get(noradId)
+  if (!rec || !rec.no) return []
+  const periodMin = (2 * Math.PI) / rec.no
+  const t0 = jsDate.getTime() - 0.1 * periodMin * 60000
+  const out = []
+  for (let i = 0; i <= n; i++) {
+    const pv = satellite.propagate(rec, new Date(t0 + (i / n) * periodMin * 60000))
+    if (pv && pv.position) out.push({ x: pv.position.x, y: pv.position.y, z: pv.position.z })
+  }
+  return out
+}
+// Rotate one ECI-km point into Earth-fixed metres for the given gmst.
+export function eciKmToEcefMeters(pt, gmst) {
+  const e = satellite.eciToEcf(pt, gmst)
+  return { x: e.x * 1000, y: e.y * 1000, z: e.z * 1000 }
+}
+
+// Load the FULL ~31k catalogue from our gateway middleware (/api/catalogue,
+// Space-Track 3LE — name + 2 lines per object). Registers every satrec and
+// returns [{norad, name, debris}]. The browser never sees Space-Track creds.
+export async function loadFullCatalogue() {
+  const out = []
+  const seen = new Set()
+  try {
+    const res = await fetch('/api/catalogue')
+    if (!res.ok) return out
+    const text = await res.text()
+    const lines = text.split('\n').map(l => l.trimEnd())
+    for (let i = 0; i + 2 < lines.length; i += 3) {
+      let name = lines[i]
+      const l1 = lines[i + 1], l2 = lines[i + 2]
+      if (name.startsWith('0 ')) name = name.slice(2).trim()
+      if (!l1.startsWith('1 ') || !l2.startsWith('2 ')) continue
+      const norad = parseInt(l2.substring(2, 7))
+      if (!norad || seen.has(norad)) continue
+      seen.add(norad)
+      if (!satrecMap.has(norad)) {
+        try {
+          const rec = satellite.twoline2satrec(l1, l2)
+          if (!rec || rec.error) continue
+          satrecMap.set(norad, rec)
+        } catch { continue }
+      }
+      out.push({ norad, name, debris: /\bDEB\b|R\/B|DEBRIS/i.test(name) })
+    }
+  } catch { /* gateway down — caller falls back to CelesTrak */ }
+  return out
+}
+
+// Bulk-load the catalogue from one or more CelesTrak GROUPs (cached 6h).
+// Registers every satrec and returns [{norad, name, group, debris}] — the
+// background "all tracked objects" cloud. One request per group, no per-sat calls.
+export async function loadCatalogue(groups) {
+  const out = []
+  const seen = new Set()
+  for (const group of groups) {
+    let text = cacheGet('g' + group)
+    if (!text) {
+      try {
+        const res = await fetch(`/celestrak/NORAD/elements/gp.php?GROUP=${group}&FORMAT=tle`)
+        if (!res.ok) continue
+        text = await res.text()
+        if (text && text.length > 50) cacheSet('g' + group, text)
+      } catch { continue }
+    }
+    const lines = text.split('\n').map(l => l.trimEnd()).filter(l => l.length)
+    const isDebris = /debris|1999-025/.test(group)
+    for (let i = 0; i + 2 < lines.length; i += 3) {
+      const name = lines[i].trim(), l1 = lines[i + 1], l2 = lines[i + 2]
+      if (!l1.startsWith('1 ') || !l2.startsWith('2 ')) continue
+      const norad = parseInt(l2.substring(2, 7))
+      if (!norad || seen.has(norad)) continue
+      seen.add(norad)
+      if (!satrecMap.has(norad)) {
+        try {
+          const rec = satellite.twoline2satrec(l1, l2)
+          if (!rec || rec.error) continue
+          satrecMap.set(norad, rec)
+        } catch { continue }
+      }
+      const deb = isDebris || /\bDEB\b|R\/B/.test(name)
+      out.push({ norad, name, group, debris: deb })
+    }
+  }
+  return out
+}
