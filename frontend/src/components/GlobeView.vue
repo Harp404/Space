@@ -185,7 +185,7 @@ const props = defineProps({
   launchPlan: { type: Object, default: null },  // active launch trajectory to draw + animate
 })
 
-const emit = defineEmits(['satellite-click', 'reroute-planned', 'launch-clear'])
+const emit = defineEmits(['satellite-click', 'reroute-planned', 'launch-clear', 'ready'])
 const cesiumContainer = ref(null)
 const trackedSat = ref(null)   // the satellite the camera is currently following
 const trackInfo = ref(null)    // live readout (lat/lon/alt/speed) for the tracked sat
@@ -217,6 +217,10 @@ onMounted(() => {
 
   // Hide the Cesium Ion credit watermark logo (keep attribution text only).
   viewer.cesiumWidget.creditContainer.style.display = 'none'
+
+  // Tell the app the globe is up after the first frame renders → hide boot loader.
+  const onFirstRender = () => { emit('ready'); viewer.scene.postRender.removeEventListener(onFirstRender) }
+  viewer.scene.postRender.addEventListener(onFirstRender)
 
   const scene = viewer.scene
   const globe = scene.globe
@@ -532,17 +536,12 @@ const CAM_TARGET_FALLBACK = Cesium.Cartesian3.fromDegrees(0, 0, 40_000_000)
 
 // Camera offset used both for the fly-in target AND while tracking, so the
 // fly-in lands EXACTLY where tracking begins (no side-snap at handoff).
-const TRACK_VIEW_FROM = new Cesium.Cartesian3(0, -600_000, 320_000)
+// Stable far-ish tracking distance (no close-range SGP4/Cesium position jitter).
+// Models are size-normalised (NORM_TARGET) so every object frames the same here.
+const TRACK_VIEW_FROM = new Cesium.Cartesian3(0, -550_000, 300_000)
 
-// View distance scaled by object size — fly CLOSER to small objects so a tiny
-// debris fragment appears about as big on screen as a large satellite.
-function viewFromFor(norad) {
-  const r = rcsMap.has(norad) ? rcsMap.get(norad) : 1
-  // Distances chosen so scale ÷ distance is constant across sizes → the CLICKED
-  // object frames to a consistent size while its model keeps its true RCS scale.
-  const f = r === 2 ? 2.22 : r === 1 ? 1.0 : 0.39    // LARGE farther, SMALL closer
-  return new Cesium.Cartesian3(0, -600_000 * f, 320_000 * f)
-}
+// Constant offset (models are size-normalised) → every clicked object frames the same.
+function viewFromFor() { return TRACK_VIEW_FROM.clone() }
 
 // The exact camera pose Cesium's tracker will impose: it builds the frame from
 // position + velocity (rotationMatrixFromPositionVelocity: x=velocity, y=right,
@@ -622,9 +621,11 @@ function riskColor(score) {
 // TLE); fall back to the gateway's live lat/lon/alt so every satellite always
 // shows and moves, then auto-upgrades to the true orbit once its TLE loads.
 function satPosition(sat, time) {
+  // Use ecefAt — the SAME position path the tracking camera follows — so the model
+  // and camera agree exactly (no front/back oscillation when zoomed in close).
   if (hasRealOrbit(sat.norad_id)) {
-    const ll = realLatLng(sat.norad_id, Cesium.JulianDate.toDate(time))
-    if (ll) return Cesium.Cartesian3.fromDegrees(ll.lng, ll.lat, ll.altitude)
+    const e = ecefAt(sat.norad_id, Cesium.JulianDate.toDate(time))
+    if (e) return new Cesium.Cartesian3(e.x, e.y, e.z)
   }
   const s = liveSat.get(sat.id) || sat
   if (typeof s.lat === 'number' && typeof s.lon === 'number') {
@@ -635,16 +636,44 @@ function satPosition(sat, time) {
 
 // Pick the 3D model for a satellite by its type. Falls back to the existing
 // generic payload model (which also serves imaging/EO sats).
-const GENERIC_MODEL = '/models/satellite_pbr_v3.glb'
+const GENERIC_MODEL = '/models/types/payload.glb'
+// Special models for iconic objects (drop the .glb at the path to activate).
+const SPECIAL_MODELS = { 25544: '/models/special/25544.glb', 20580: '/models/special/20580.glb' }
+const HAVE_SPECIAL = { 25544: true, 20580: true }  // confirmed present (async check below refines)
+
+// Models come in wildly different native sizes — normalise each to one world size
+// so a tracked object always frames consistently (measured max-dimension per file).
+const MODEL_DIM = {
+  '/models/types/payload.glb': 13.08, '/models/types/comms.glb': 6.42, '/models/types/debris.glb': 7.19,
+  '/models/types/rocket_body.glb': 4.92, '/models/types/station.glb': 14,
+  '/models/special/starlink.glb': 6.42, '/models/special/25544.glb': 111.99, '/models/special/20580.glb': 525.49,
+}
+const NORM_TARGET = 150_000     // every model rendered ≈ 150 km — framed well at the tracking distance, never gigantic
+function normScale(uri) { const d = MODEL_DIM[uri]; return d ? NORM_TARGET / d : 1 }
+function modelByNorad(norad) { return HAVE_SPECIAL[norad] ? SPECIAL_MODELS[norad] : null }
+function isRocketBody(name) { return /R\/B|ROCKET BODY|ROCKET BOOSTER|\bAKM\b|\bPKM\b/i.test(name || '') }
 function modelForSat(sat) {
+  const sp = modelByNorad(sat.norad_id); if (sp) return sp
+  if (isRocketBody(sat.name)) return '/models/types/rocket_body.glb'
   switch (groupOf(sat)) {
-    case 'stations': return '/models/types/station.glb'
+    case 'stations': return HAVE_SPECIAL[25544] ? '/models/special/25544.glb' : '/models/types/station.glb'
     case 'starlink':
     case 'oneweb':   return '/models/types/comms.glb'
     case 'debris':   return '/models/types/debris.glb'
     default:         return GENERIC_MODEL   // imaging / other payloads
   }
 }
+// Confirm which special models actually exist. The dev server returns index.html
+// (200) for missing files, so verify the real glTF magic bytes ("glTF"), not status.
+;(async () => {
+  for (const [norad, url] of Object.entries(SPECIAL_MODELS)) {
+    try {
+      const r = await fetch(url); if (!r.ok) continue
+      const m = new Uint8Array((await r.arrayBuffer()).slice(0, 4))
+      if (m[0] === 0x67 && m[1] === 0x6c && m[2] === 0x54 && m[3] === 0x46) HAVE_SPECIAL[norad] = true
+    } catch { /* missing */ }
+  }
+})()
 
 function makeSatEntity(sat) {
   const posProp = new Cesium.CallbackPositionProperty(
@@ -657,10 +686,10 @@ function makeSatEntity(sat) {
     // Real 3D satellite model, chosen by type — shown only within ~2500 km.
     // Catalogue objects match the cloud model size so clicking doesn't resize it.
     model: {
-      uri: modelForSat(sat),
-      minimumPixelSize: catSz ? catSz.minPix : (isAlert ? 26 : 22),
-      maximumScale: catSz ? catSz.maxScale : 16000,
-      scale: catSz ? catSz.scale : 1500,
+      uri: (() => { const u = modelForSat(sat); sat._modelUri = u; return u })(),
+      minimumPixelSize: catSz ? catSz.minPix : (isAlert ? 42 : 34),
+      maximumScale: catSz ? catSz.maxScale : 60000,
+      scale: normScale(sat._modelUri),
       colorBlendMode: Cesium.ColorBlendMode.HIGHLIGHT,
       distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0.0, 2_500_000),
     },
@@ -784,9 +813,11 @@ function modelSizeFor(norad, debris) {
   // DRAMATIC proportional sizing so small/medium/large are clearly distinct in
   // the swarm (pixel floor 7→16→32) while world-scale ÷ view-distance stays
   // constant so the clicked object frames consistently.
-  if (r === 2) return { scale: 4000, minPix: 32, maxScale: 50000 }  // LARGE
-  if (r === 1) return { scale: 1800, minPix: 16, maxScale: 28000 }  // MEDIUM
-  return { scale: 700, minPix: 7, maxScale: 14000 }                  // SMALL / unknown
+  // Real models are real-world scale → base scale 1; pixel floor sets far visibility
+  // (RCS-differentiated), maxScale lets far/tiny objects reach the floor without ballooning.
+  if (r === 2) return { scale: 1, minPix: 56, maxScale: 90000 }   // LARGE
+  if (r === 1) return { scale: 1, minPix: 38, maxScale: 60000 }   // MEDIUM
+  return { scale: 1, minPix: 24, maxScale: 40000 }                 // SMALL / unknown
 }
 
 // How many of the nearest-to-camera objects get a real 3D model (rest = points).
@@ -879,12 +910,13 @@ function updateNearestModels() {
           return e ? new Cesium.Cartesian3(e.x, e.y, e.z) : undefined
         }, false),
         model: (() => {
-          const sz = modelSizeFor(it.norad, it.debris)   // proportional to real RCS size
+          const sz = modelSizeFor(it.norad, it.debris)   // RCS → pixel floor (far swarm)
+          const uri = modelByNorad(it.norad) || (it.debris ? '/models/types/debris.glb' : isRocketBody(it.name) ? '/models/types/rocket_body.glb' : GENERIC_MODEL)
           return {
-            uri: it.debris ? '/models/types/debris.glb' : GENERIC_MODEL,
+            uri,
             minimumPixelSize: sz.minPix,
             maximumScale: sz.maxScale,
-            scale: sz.scale,
+            scale: normScale(uri),   // normalise so every model frames the same when tracked
           }
         })(),
       })
@@ -1426,11 +1458,22 @@ function livePos(sat) {
   return ent ? ent.position.getValue(viewer.clock.currentTime) : undefined
 }
 
+let trackedModelEnt = null
+function restoreModelVis(e) {
+  if (!e) return
+  if (e.model) e.model.distanceDisplayCondition = new Cesium.DistanceDisplayCondition(0, 2_500_000)
+  if (e.point) e.point.show = true
+}
 function trackSat(sat) {
   const entity = satEntities.get(sat.id)
   if (!entity) return
   emit('satellite-click', sat)
   trackedSat.value = sat
+  // Keep the SELECTED model visible at ANY zoom (don't collapse to a dot).
+  restoreModelVis(trackedModelEnt)
+  trackedModelEnt = entity
+  if (entity.model) entity.model.distanceDisplayCondition = undefined
+  if (entity.point) entity.point.show = false
   showOrbit(sat)                    // trace the satellite's orbit path
   startInfoUpdates(sat)            // live lat/lon/alt/speed readout
 
@@ -1471,6 +1514,8 @@ function trackSat(sat) {
 function stopTracking() {
   clearOrbit()
   stopInfoUpdates()
+  restoreModelVis(trackedModelEnt)   // let it collapse back to a dot when far again
+  trackedModelEnt = null
   if (camFallbackPos) camTargetEntity.position = camFallbackPos   // reset for next track
   viewer.trackedEntity = undefined
   viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY)

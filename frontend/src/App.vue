@@ -19,6 +19,7 @@
           @satellite-click="onSatelliteClick"
           @reroute-planned="onReroutePlanned"
           @launch-clear="launchPlan = null"
+          @ready="onGlobeReady"
         />
       </div>
     </div>
@@ -69,6 +70,15 @@
 
     <AgentChat @action="onAgentAction" />
 
+    <transition name="boot-fade">
+      <div v-if="appLoading" class="boot">
+        <div class="boot-logo">ASTRO<span>MESH</span></div>
+        <div class="boot-bar"><div class="boot-bar-fill" :style="{ width: bootProgress + '%' }"></div></div>
+        <div class="boot-text">INITIALIZING ORBITAL PICTURE… {{ bootProgress }}%</div>
+        <div class="boot-sub">streaming Earth · loading models · screening conjunctions</div>
+      </div>
+    </transition>
+
     <div v-if="resetPending" class="reset-overlay">
       <div class="reset-spinner"></div>
       <span>RESETTING NETWORK...</span>
@@ -103,6 +113,27 @@ const lastManeuver = ref(null)
 const activePlan = ref(null)
 const planningId = ref(null)
 const launchPlan = ref(null)
+const appLoading = ref(true)
+const bootProgress = ref(0)
+// Progressive boot: preload the LIGHT models + wait for the globe's first frame, then
+// reveal. The heavy 44 MB ISS is NOT preloaded — it streams on demand when tracked.
+const LIGHT_MODELS = [
+  '/models/types/payload.glb', '/models/types/comms.glb', '/models/types/debris.glb',
+  '/models/types/rocket_body.glb', '/models/special/starlink.glb', '/models/special/20580.glb',
+]
+const BOOT_TOTAL = LIGHT_MODELS.length + 1   // +1 = globe ready
+let bootSteps = 0
+function bootStep() {
+  bootSteps++
+  bootProgress.value = Math.min(100, Math.round((bootSteps / BOOT_TOTAL) * 100))
+  if (bootSteps >= BOOT_TOTAL) setTimeout(() => (appLoading.value = false), 450)
+}
+function onGlobeReady() { bootStep() }
+onMounted(() => {
+  LIGHT_MODELS.forEach((u) => fetch(u).then((r) => r.arrayBuffer()).catch(() => {}).finally(bootStep))
+})
+// Safety: never hang the loader.
+setTimeout(() => { if (appLoading.value) appLoading.value = false }, 15000)
 const globeRef = ref(null)
 
 // --- History (saved reroutes + launches), persisted to localStorage ---
@@ -525,6 +556,45 @@ button {
   min-height: 0;
   overflow: hidden;
 }
+
+.boot {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  background: radial-gradient(ellipse at center, #0a1322 0%, #03060c 70%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+}
+.boot-logo {
+  font-family: var(--font-mono);
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: 0.32em;
+  color: #e8f1ff;
+  text-shadow: 0 0 24px rgba(59,130,246,0.5);
+}
+.boot-logo span { color: #22d3ee; }
+.boot-bar {
+  width: 320px;
+  height: 6px;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.08);
+  overflow: hidden;
+  border: 1px solid rgba(34,211,238,0.25);
+}
+.boot-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #3b82f6, #22d3ee);
+  box-shadow: 0 0 12px rgba(34,211,238,0.6);
+  transition: width 0.3s ease;
+}
+.boot-text { font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.2em; color: #9fb6d0; }
+.boot-sub { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.12em; color: #5f7e9f; }
+.boot-fade-leave-active { transition: opacity 0.6s ease; }
+.boot-fade-leave-to { opacity: 0; }
 
 .reset-overlay {
   position: fixed;

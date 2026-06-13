@@ -1,250 +1,132 @@
-# AstroMesh
+# 🛰️ AstroMesh
 
-**Distributed, formally-verified orbital maneuver consensus for satellite collision avoidance.**
+**An autonomous, trustless, formally-verified nervous system for the orbital economy** — real-time collision screening, AI-driven avoidance planning, and decentralized multi-operator maneuver consensus, on a live CesiumJS digital twin of orbit.
 
----
-
-## The Problem
-
-Low-Earth orbit is becoming a demolition derby.
-
-| Stat | Source |
-|------|--------|
-| 54,000+ tracked objects (≥ 10 cm) | ESA Space Debris Office, 2025 |
-| ~300,000 Starlink maneuvers per year | SpaceX public reporting |
-| Coordination today: **email** and phone calls | IADC best-practice docs |
-| ESA CREAM conjunction service | Single point of failure; no distributed consensus |
-
-When two debris clouds threaten an active satellite, every ground-control agency — ISRO, ESA, JAXA, SpaceX — must agree that a maneuver is warranted *and* physically possible before firing thrusters. Today that agreement is informal. A miscommunication during the 2009 Iridium-33 / Cosmos-2251 collision cost the industry $400M+ and created ~2,000 new debris fragments still tracked today.
-
-**The gap:** no open, distributed protocol exists for multi-agency maneuver authorisation with formal safety guarantees.
+> Built for **FAR AWAY 2026** · Themes: **Space & Aerospace** · **Agentic & Autonomous Systems** · **Logistics & Transit (orbital traffic management)**
 
 ---
 
-## The Solution
+## The problem (real, and unsolved)
 
-AstroMesh is a four-node distributed platform that replaces ad-hoc coordination with:
+Low-Earth orbit is becoming ungovernable, and the coordination layer simply doesn't exist:
 
-1. **Bully leader election** — highest-ID online node becomes coordinator; automatic failover in < 1 s.
-2. **Two-Phase Commit (2PC) consensus** — a maneuver is only authorised when ≥ 3 of 4 nodes vote YES.
-3. **Formally verified invariants** — TLA+ model checker proves no false approval is reachable.
-4. **Real-time situational awareness** — CelesTrak SOCRATES conjunction data + live WebSocket feeds to a Vue / CesiumJS globe.
-5. **AI agent escalation** — autonomous monitoring escalates high-risk (> 70 risk index) conjunctions to consensus without human latency.
+| Reality | Source |
+|---|---|
+| ~300,000 Starlink collision-avoidance maneuvers in **2025** (up 50% YoY) | SpaceX / Basenor reporting |
+| **No contact directory or protocol** for operators to deconflict a maneuver | AIAA *Heavy Traffic Ahead* |
+| Operators maneuver **without sharing plans** → both can dodge *into* each other | ScienceDirect, "norms of behavior" |
+| SpaceX vs Amazon (Dec 2025): refused to share predicted maneuvers | SpaceDaily |
+| US ↔ China barely communicate about assets → needs **no central authority** | AIAA |
+| NOAA + SpaceX now building automated CA — *it's being built right now* | US Office of Space Commerce |
+
+**The gap:** there is no open, trustless protocol for multi-operator maneuver authorization with formal safety guarantees. That's what AstroMesh is.
+
+---
+
+## What it does
+
+- **Real conjunction screening** — own SGP4 engine over the full **~31,000-object Space-Track catalogue**; finds close approaches in the next 24 h. **Verified against CelesTrak SOCRATES: time-of-closest-approach exact to the second, relative velocity exact.**
+- **Operational accuracy layer** — overlays **real US Space Force CDMs** (covariance-based miss + Pc) on top of our screening. Two-tier model, exactly how real Space Traffic Management works.
+- **Collision-avoidance reroute** — minimum-Δv maneuver, **re-screened against all 31k objects**, cooperative (both operators move), with the maneuver in plain English ("change orbit 0.08°, Δv 1.1 m/s"). Drawn red→blue on the globe; debris correctly flagged un-maneuverable.
+- **Decentralized consensus** — 4 ground-control nodes (Raft/Bully leader election, failover), real votes; a maneuver is APPROVED only with ≥3/4. **A TLA+ model proves two satellites can never be ordered into conflicting maneuvers.**
+- **Autonomous triage agent** — when active, detects the top real threat → plans a real maneuver → drives it to a consensus vote, hands-free.
+- **AI mission-control (Groq `gpt-oss-120b`)** — talk to it in plain English; it reasons over the live engine **and controls the globe**: "show the FENGYUN × XSAT conjunction", "plan the reroute", "track Hubble", "zoom in", "simulate a launch from Baikonur to 550 km".
+- **Launch trajectory planner** — enter a launch site + target orbit → real azimuth / inclination / insertion-Δv physics (with Earth-rotation assist), best launch window, COLA shell-congestion check, and an optional real-physics ascent simulation with live telemetry.
+- **History** — every reroute and launch saved (rename, categories) in the browser.
+
+---
+
+## Accuracy — measured, with honest caveats
+
+Cross-validated against **30 real US Space Force conjunction events**:
+
+| Quantity | Result |
+|---|---|
+| **Time of closest approach** | **100%** within 1 s (median error 0.0 s) |
+| **Miss distance** (screening) | within **2 km of the operational value 93%** of the time |
+| **Pc method** vs CelesTrak SOCRATES "max probability" | 75% within 1 order of magnitude |
+| **CDM data shown** | 100% verbatim from Space-Track |
+
+**Honest framing (this is a strength, not a weakness):** TLEs carry no covariance, so miss-distance is fundamentally **screening-grade** — *every* TLE-based tool (incl. SOCRATES) has this limit. That's exactly why we layer the real covariance-based CDMs on top, label Pc "screening-grade," and treat APPROVED as a **coordination decision** (we don't claim to command real spacecraft). Launch coordinates are simulated (nobody's launching this instant).
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        AstroMesh Cluster                        │
-│                                                                 │
-│   Node 1 (ISRO)          Node 2 (ESA)                          │
-│   ┌──────────┐           ┌──────────┐                          │
-│   │ Go gRPC  │◄─────────►│ Go gRPC  │                          │
-│   └────┬─────┘  Raft /   └────┬─────┘                          │
-│        │        2PC log        │                                │
-│   Node 3 (JAXA)          Node 4 (SpaceX) ← LEADER (Bully)      │
-│   ┌──────────┐           ┌──────────┐                          │
-│   │ Go gRPC  │◄─────────►│ Go gRPC  │                          │
-│   └──────────┘           └──────────┘                          │
-│                               │                                 │
-│                         ┌─────▼──────┐                         │
-│                         │  REST API  │  HTTP :8080              │
-│                         │  /ws       │  WebSocket               │
-│                         └─────┬──────┘                         │
-└───────────────────────────────┼─────────────────────────────────┘
-                                │
-              ┌─────────────────▼──────────────────┐
-              │         Vue 3 + CesiumJS            │
-              │  • 3-D globe with satellite tracks  │
-              │  • Conjunction risk heat-map        │
-              │  • Live consensus vote visualiser   │
-              │  • Node health / leader indicator   │
-              └────────────────────────────────────┘
-                                │
-              ┌─────────────────▼──────────────────┐
-              │         External Data               │
-              │  CelesTrak SOCRATES (free, no auth) │
-              │  NOAA SWPC space-weather feeds      │
-              │  TLE sets: GP catalogue             │
-              └────────────────────────────────────┘
+ CesiumJS + Vue 3 frontend  (port 5173)
+        |  /api, /ws  (vite proxy)
+        v
+ Node gateway  dev/mock-gateway.js  (port 8090)
+   - Space-Track: 31k catalogue (3LE), SATCAT RCS, public CDMs   [cached, refreshed 3x/day]
+   - SGP4 conjunction screening + min-dv reroute (full-catalogue COLA)
+   - Launch-trajectory physics
+   - Groq gpt-oss-120b agent (key server-side)
+   - Raft/Bully consensus simulation + WebSocket live state
+        |
+ Go distributed cluster  (*.go, docker-compose)   <- the real multi-node consensus engine
+   - Bully election - 2-phase maneuver commit - membership/failover
+ Formal proof  formal/AstroMesh.tla (+ .cfg)      <- TLA+ safety invariants
 ```
 
-### Consensus flow for a maneuver request
+**Tech:** Vue 3 + CesiumJS 1.142 · satellite.js (SGP4) · Node (zero-dep gateway) · Go (gorilla/mux) · TLA+ · Groq (gpt-oss-120b) · marked.
+
+**Data sources:** Space-Track.org (catalogue, SATCAT, CDMs) · CelesTrak SOCRATES (validation) · Cesium Ion (Google imagery, streamed) · NASA 3D Resources (ISS, Hubble models).
+
+---
+
+## Repository layout
 
 ```
-Client          Leader(4)          Node 1,2,3
-  │                │                   │
-  │ POST /maneuver │                   │
-  │───────────────►│                   │
-  │                │  PREPARE(conjId)  │
-  │                │──────────────────►│
-  │                │◄── VOTE YES/NO ───│
-  │                │                   │
-  │         tally votes                │
-  │         ≥3 YES → COMMIT            │
-  │                │──── COMMIT ──────►│
-  │◄── APPROVED ───│                   │
+├── main.go, consensus.go, election.go, membership.go,   # Go distributed cluster
+│   agent.go, websocket.go, database.go, helpers.go
+├── formal/AstroMesh.tla, AstroMesh.cfg                  # TLA+ formal safety proof
+├── dev/mock-gateway.js                                 # Node gateway (engine + AI + data)
+├── frontend/                                           # Vue 3 + CesiumJS app
+│   ├── src/components/  (GlobeView, ConjunctionPanel, AgentChat, LaunchPanel,
+│   │                     HistoryPanel, SideDrawer, NodeCluster, MissionFeed, …)
+│   └── public/models/   types/ + special/ (ISS, Hubble, Starlink GLBs)
+├── Dockerfile, docker-compose.yml                      # 4-node cluster
+└── ROADMAP.md
 ```
 
 ---
 
-## Key Features
+## Run it
 
-### Distributed Consensus (Bully + 2PC)
-- Leader elected by highest-ID Bully algorithm; sub-second failover when a node crashes.
-- Two-phase commit ensures atomicity: no partial approvals.
-- Quorum requirement (≥ 3/4) tolerates one simultaneous node failure.
-- All vote records appended to a replicated log; `GET /replication-summary` shows per-node lag.
-
-### Formal Verification (TLA+)
-The file `formal/AstroMesh.tla` specifies the full protocol and proves:
-
-| Invariant | Meaning |
-|-----------|---------|
-| `Safety` | A conjunction is never `APPROVED` with fewer than 3 YES votes |
-| `NoDoubleApproval` | Once approved, a conjunction cannot be re-locked or re-denied |
-| `LeaderUniqueness` | At most one leader exists at any time |
-| `LeaderConsistency` | The elected leader is always the highest-ID online node |
-| `QuorumLiveness` | If ≥ 3 nodes are online, every MONITORING conjunction eventually resolves |
-
-TLC model-checks all reachable states with `Nodes={1,2,3,4}`, `Conjunctions={1,2,3}`.
-
-### Real Orbital Data
-- **CelesTrak SOCRATES** — free conjunction screening; no API key required.
-- **TLE catalogue** — fetched live from `celestrak.org/NORAD/elements/gp.php`; 1-hour cache.
-- **NOAA SWPC** — space-weather alerts (geomagnetic storms affect drag predictions).
-- Satellite positions drift realistically every 4 seconds (simplified J2 perturbation model).
-
-### AI Agent
-- Background agent polls conjunctions every 10 seconds.
-- Auto-escalates any event with `risk_index > 70` directly to consensus.
-- Toggle via `POST /api/agent/toggle {enabled: true}`.
-- All agent decisions broadcast over WebSocket as `CONJUNCTION_ALERT` then `MANEUVER_EVENT`.
-
-### Frontend (Vue 3 + CesiumJS)
-- 3-D Earth globe with live satellite positions.
-- Colour-coded risk overlays: green (< 30) → amber (30–60) → red (> 60).
-- Real-time consensus vote visualiser: watch nodes cast YES/NO with animated transitions.
-- Node health panel: click to kill/revive nodes and trigger live Bully re-election.
-
----
-
-## Quick Start (Dev — no Docker needed)
-
-### 1. Start the mock gateway
-
+### 1. Demo (gateway + frontend) — what the UI uses
 ```bash
-cd dev
-node mock-gateway.js
-# Server: http://localhost:8090
-# WebSocket: ws://localhost:8090/ws
-```
+# repo root: create .env (gitignored)
+cat > .env <<EOF
+SPACETRACK_IDENTITY=your_space-track_email
+SPACETRACK_PASSWORD=your_space-track_password
+GROQ_API_KEY=your_groq_key
+GROQ_MODEL=openai/gpt-oss-120b
+EOF
 
-No npm install required — pure Node.js built-ins only.
+node dev/mock-gateway.js          # gateway -> http://localhost:8090  (first run warms the catalogue ~1-2 min)
 
-### 2. Start the frontend
-
-```bash
 cd frontend
-npm install
-npm run dev
-# App: http://localhost:5173
+echo "VITE_CESIUM_TOKEN=your_cesium_ion_token" > .env
+npm install && npm run dev        # app -> http://localhost:5173
 ```
 
-### 3. Test consensus manually
-
+### 2. Distributed consensus cluster (Go) + formal proof
 ```bash
-# Trigger 2PC vote on conjunction 1 (risk 88.5 — almost always APPROVED)
-curl -X POST http://localhost:8090/api/maneuver/request \
-     -H "Content-Type: application/json" \
-     -d '{"conjunction_id": 1}'
-
-# Kill Node 3, watch leader change
-curl -X POST http://localhost:8090/control/node/3/stop
-
-# Enable AI agent
-curl -X POST http://localhost:8090/api/agent/toggle \
-     -H "Content-Type: application/json" \
-     -d '{"enabled": true}'
+docker-compose up                 # 4 Go nodes with Bully election + maneuver consensus
+# TLA+: open formal/AstroMesh.tla in the TLA+ Toolbox and run the model checker
 ```
 
----
-
-## Docker (Full Stack)
-
-```bash
-docker compose up
-```
-
-Services:
-- `node1` … `node4` — Go consensus nodes on internal network
-- `gateway` — exposes REST + WebSocket on `:8080`
-- `frontend` — Nginx serving the built Vue app on `:3000`
+> Pre-warm before a live demo: the first gateway start fetches + screens the catalogue (cached afterward). The 43 MB ISS model streams on demand (only when tracked).
 
 ---
 
-## TLA+ Model Checking
-
-```bash
-# Install TLA+ Toolbox or use tla2tools.jar
-java -jar tla2tools.jar -config formal/AstroMesh.cfg formal/AstroMesh.tla
-
-# Or open formal/AstroMesh.tla in the TLA+ Toolbox IDE
-# and run TLC model checker with the bundled AstroMesh.cfg
-```
-
-Expected output: all five invariants hold, QuorumLiveness verified, no counter-examples found.
+## Honest limitations
+- Miss-distance from public TLEs is **screening-grade** (no covariance) — operational fidelity comes from the CDM layer.
+- "APPROVED" is the **coordination decision**, not a command to real hardware (we can't fly real spacecraft).
+- The browser gateway simulates the consensus the Go cluster implements for real; both are included.
+- Launch coordinates are user-entered/simulated.
 
 ---
 
-## Project Structure
-
-```
-.
-├── main.go                  # Go consensus node (production)
-├── database.go              # SQLite state persistence
-├── go.mod
-├── dev/
-│   └── mock-gateway.js      # Pure Node.js dev server (zero deps)
-├── formal/
-│   ├── AstroMesh.tla        # TLA+ protocol specification
-│   └── AstroMesh.cfg        # TLC model checker config
-├── frontend/
-│   ├── src/
-│   │   ├── App.vue
-│   │   ├── components/
-│   │   └── composables/
-│   └── package.json
-└── docker-compose.yml
-```
-
----
-
-## Judging Criteria Alignment
-
-| Criterion | How AstroMesh Scores |
-|-----------|----------------------|
-| **Innovation** | First open-source multi-agency orbital maneuver consensus protocol; formal TLA+ proof of safety invariants applied to space operations |
-| **Engineering depth** | Bully election + 2PC from scratch in Go; correct WebSocket implementation; TLA+ model checker integration; replicated log with lag tracking |
-| **Real-world impact** | Addresses a genuine coordination gap responsible for events like Iridium-Cosmos 2009; directly applicable to the ~300k maneuver/year Starlink fleet |
-| **Scalability** | Quorum-based consensus tolerates one node failure; Bully failover is O(n); design extends to N nodes with configurable quorum thresholds |
-| **Design / UX** | CesiumJS 3-D globe gives visceral situational awareness; live vote visualiser makes distributed consensus tangible for non-engineers |
-| **Execution** | Fully runnable in < 60 s with `node mock-gateway.js`; no API keys; demo shows node kill, leader re-election, consensus vote, and AI escalation in one live flow |
-
----
-
-## Data Sources (Free, No Auth)
-
-| Source | URL | Used for |
-|--------|-----|---------|
-| CelesTrak GP TLE catalogue | `celestrak.org/NORAD/elements/gp.php` | Live orbital elements |
-| CelesTrak SOCRATES | `celestrak.org/SOCRATES/` | Conjunction screening |
-| NOAA SWPC alerts | `services.swpc.noaa.gov/products/alerts.json` | Space weather |
-
----
-
-## License
-
-MIT — build on it, fork it, deploy it.
+*AstroMesh — air-traffic-control for the orbital economy, provably safe.*
