@@ -10,7 +10,7 @@
         </span>
         CONJUNCTION RISK MONITOR
       </div>
-      <div class="panel-meta mono">TOP {{ sorted.length }} PAIRS</div>
+      <div class="panel-meta mono">{{ cdms.length }} OFFICIAL · {{ conjunctions.length }} SCREENED</div>
     </div>
 
     <!-- Last maneuver result -->
@@ -27,6 +27,30 @@
           <span class="vote-val">{{ vote.vote }}</span>
         </div>
       </div>
+    </div>
+
+    <!-- Avoidance plan result -->
+    <div v-if="activePlan" class="plan-result">
+      <div class="plan-head">
+        <span class="plan-title">✓ AVOIDANCE PLAN</span>
+        <button class="plan-close" @click="$emit('clearPlan')">×</button>
+      </div>
+      <div class="plan-grid">
+        <div><span class="pl-k">MISS OPENS</span><span class="pl-v ok">{{ activePlan.original_miss_km }} → {{ activePlan.new_miss_km }} km</span></div>
+        <div><span class="pl-k">TOTAL Δv</span><span class="pl-v">{{ activePlan.total_delta_v_ms }} m/s</span></div>
+        <div><span class="pl-k">SCREENED</span><span class="pl-v">{{ activePlan.screened_objects }} / {{ activePlan.catalogue_size }}</span></div>
+        <div><span class="pl-k">VS 33K CATALOGUE</span><span class="pl-v" :class="activePlan.clear_vs_catalogue ? 'ok' : 'bad'">{{ activePlan.clear_vs_catalogue ? 'CLEAR' : activePlan.new_conjunctions.length + ' NEW' }}</span></div>
+      </div>
+      <div class="plan-maneuvers">
+        <div v-for="(m, i) in activePlan.maneuvers" :key="i" class="pm-row">
+          <span class="pm-sat">{{ m.sat }}</span>
+          <span v-if="m.maneuverable" class="pm-act">
+            change orbit <b>{{ m.orbit_shift_deg }}°</b> · {{ m.direction }} <b>{{ m.altitude_change_km }} km</b> · Δv {{ m.delta_v_ms }} m/s
+          </span>
+          <span v-else class="pm-deb">cannot maneuver — debris / rocket body</span>
+        </div>
+      </div>
+      <div class="plan-legend"><span class="lg-red">— current path</span><span class="lg-blue">— safer path</span></div>
     </div>
 
     <!-- List -->
@@ -52,6 +76,10 @@
 
         <!-- Satellites -->
         <div class="sat-pair">
+          <div class="source-tag" :class="conj.source === 'CDM' ? 'src-cdm' : 'src-screen'">
+            <template v-if="conj.source === 'CDM'">● OFFICIAL · USSF CDM</template>
+            <template v-else>○ OUR SCREENING</template>
+          </div>
           <div class="sat-name">{{ conj.sat1_name }}</div>
           <div class="vs-divider">
             <svg width="12" height="8" viewBox="0 0 12 8" fill="none">
@@ -98,6 +126,16 @@
 
         <!-- Actions -->
         <div class="actions-col">
+          <span v-if="conj.source === 'CDM'" class="live-tag" title="Live operational data — read only">LIVE</span>
+          <template v-else>
+          <button
+            class="btn-plan"
+            :disabled="planningId === conj.id"
+            @click="$emit('planManeuver', conj.id)"
+            title="Plan avoidance maneuver (screens vs whole catalogue)"
+          >
+            {{ planningId === conj.id ? '…' : 'PLAN' }}
+          </button>
           <button
             class="btn-approve"
             :disabled="conj.status === 'APPROVED' || conj.status === 'RESOLVED'"
@@ -119,6 +157,7 @@
               <circle cx="5" cy="5" r="4" stroke="currentColor" stroke-width="1.1"/>
             </svg>
           </button>
+          </template>
         </div>
       </div>
     </div>
@@ -133,20 +172,53 @@ const props = defineProps({
     type: Array,
     default: () => [],
   },
+  cdms: {
+    type: Array,
+    default: () => [],
+  },
   leaderName: String,
   lastManeuver: {
     type: Object,
     default: null,
   },
+  activePlan: { type: Object, default: null },
+  planningId: { type: [Number, String], default: null },
 })
 
-const emit = defineEmits(['requestManeuver', 'emergencyOverride'])
+const emit = defineEmits(['requestManeuver', 'emergencyOverride', 'planManeuver', 'clearPlan'])
 
-const sorted = computed(() =>
-  [...props.conjunctions]
-    .sort((a, b) => (b.risk_index || 0) - (a.risk_index || 0))
-    .slice(0, 10),
-)
+// Derive a 0-100 risk index from the operational Pc of a real CDM.
+function riskFromPc(pc) {
+  if (pc == null || pc <= 0) return 30
+  if (pc > 1e-2) return 96
+  if (pc > 3e-3) return 88
+  if (pc > 1e-3) return 80
+  if (pc > 1e-4) return 64
+  if (pc > 1e-5) return 46
+  return 32
+}
+
+// Real operational CDMs (covariance-based, US Space Force) take priority, then
+// our own SGP4 screening fills out broad coverage. One unified, ranked list.
+const sorted = computed(() => {
+  const official = [...props.cdms].map((c) => ({
+    id: 'cdm-' + c.id,
+    sat1_name: c.sat1_name,
+    sat2_name: c.sat2_name,
+    min_range_km: c.min_range_km,
+    probability: c.probability,
+    risk_index: riskFromPc(c.probability),
+    tca: c.tca && !c.tca.endsWith('Z') ? c.tca + 'Z' : c.tca,
+    status: 'OFFICIAL',
+    source: 'CDM',
+    emergency: c.emergency,
+  }))
+  const screened = [...props.conjunctions].map((c) => ({ ...c, source: 'SGP4' }))
+  official.sort((a, b) => (b.probability || 0) - (a.probability || 0))
+  screened.sort((a, b) => (b.risk_index || 0) - (a.risk_index || 0))
+  // Show both layers: the highest-Pc official CDMs on top, then our own screening.
+  return [...official.slice(0, 8), ...screened.slice(0, 6)]
+})
 
 function getRiskClass(ri) {
   if (ri >= 70) return 'critical'
@@ -321,6 +393,7 @@ function formatTCA(tca) {
 .conj-list {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 4px 6px;
 }
 
@@ -506,6 +579,37 @@ function formatTCA(tca) {
   border: 1px solid var(--border);
 }
 
+.status-official {
+  color: #22d3ee;
+  background: rgba(34, 211, 238, 0.12);
+  border: 1px solid rgba(34, 211, 238, 0.4);
+}
+
+/* Source tag (CDM = official covariance data, vs our screening) */
+.source-tag {
+  font-family: var(--font-mono);
+  font-size: 7px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  margin-bottom: 1px;
+}
+
+.src-cdm { color: #22d3ee; }
+.src-screen { color: var(--text-dim); opacity: 0.6; }
+
+.live-tag {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #22d3ee;
+  background: rgba(34, 211, 238, 0.1);
+  border: 1px solid rgba(34, 211, 238, 0.3);
+  border-radius: 3px;
+  padding: 3px 6px;
+  animation: blink-dot 2s ease-in-out infinite;
+}
+
 /* Actions */
 .actions-col {
   display: flex;
@@ -562,4 +666,50 @@ function formatTCA(tca) {
 .mono {
   font-family: var(--font-mono);
 }
+
+/* Avoidance plan result banner */
+.plan-result {
+  margin: 8px;
+  padding: 9px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  background: rgba(16, 185, 129, 0.06);
+  flex-shrink: 0;
+}
+.plan-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 7px; }
+.plan-title { font-family: var(--font-mono); font-size: 10px; font-weight: 700; letter-spacing: 0.08em; color: var(--color-green); }
+.plan-close { color: var(--text-dim); font-size: 16px; line-height: 1; padding: 0 4px; }
+.plan-close:hover { color: var(--text-primary); }
+.plan-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 12px; }
+.plan-grid > div { display: flex; flex-direction: column; gap: 1px; }
+.pl-k { font-family: var(--font-mono); font-size: 7px; letter-spacing: 0.1em; color: var(--text-dim); }
+.pl-v { font-family: var(--font-mono); font-size: 11px; font-weight: 600; color: var(--text-primary); }
+.pl-v.ok { color: var(--color-green); }
+.pl-v.bad { color: var(--color-red); }
+.plan-maneuvers { margin-top: 8px; display: flex; flex-direction: column; gap: 5px; }
+.pm-row { display: flex; flex-direction: column; gap: 1px; border-left: 2px solid rgba(59,130,246,0.4); padding-left: 7px; }
+.pm-sat { font-family: var(--font-mono); font-size: 9px; font-weight: 700; color: var(--text-primary); letter-spacing: 0.04em; }
+.pm-act { font-size: 10.5px; color: var(--text-secondary); }
+.pm-act b { color: #60a5fa; font-weight: 700; }
+.pm-deb { font-size: 10px; color: var(--text-dim); font-style: italic; }
+.plan-legend { display: flex; gap: 14px; margin-top: 8px; font-family: var(--font-mono); font-size: 8px; }
+.lg-red { color: #ef4444; }
+.lg-blue { color: #3b82f6; }
+
+.btn-plan {
+  display: flex;
+  align-items: center;
+  padding: 3px 6px;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  border-radius: 3px;
+  color: var(--color-green);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  transition: all 0.15s;
+}
+.btn-plan:hover:not(:disabled) { background: rgba(16, 185, 129, 0.25); box-shadow: 0 0 8px rgba(16, 185, 129, 0.3); }
+.btn-plan:disabled { opacity: 0.5; cursor: wait; }
 </style>

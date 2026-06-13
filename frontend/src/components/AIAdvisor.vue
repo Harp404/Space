@@ -28,14 +28,10 @@
       <!-- Status + scan countdown -->
       <div class="status-row">
         <div class="status-indicator" :class="agentEnabled ? 'status-active' : 'status-standby'">
-          <span class="status-dot">
-            <span v-if="agentEnabled" class="dot-pulse"></span>
-          </span>
+          <span class="status-dot"><span v-if="agentEnabled" class="dot-pulse"></span></span>
           <span class="status-text">{{ agentEnabled ? 'ACTIVE' : 'STANDBY' }}</span>
         </div>
-        <div v-if="agentEnabled" class="scan-countdown mono">
-          NEXT SCAN {{ scanCountdown }}s
-        </div>
+        <div v-if="agentEnabled" class="scan-countdown mono">NEXT SCAN {{ scanCountdown }}s</div>
       </div>
 
       <!-- Threat summary row -->
@@ -62,11 +58,7 @@
         <div v-if="escalationQueue.length === 0" class="queue-empty">
           <span>— Queue clear —</span>
         </div>
-        <div
-          v-for="conj in escalationQueue"
-          :key="conj.id"
-          class="queue-item"
-        >
+        <div v-for="conj in escalationQueue" :key="conj.id" class="queue-item">
           <span class="queue-risk mono">{{ Math.round(conj.risk_index) }}</span>
           <div class="queue-sats">
             <span>{{ conj.sat1_name }}</span>
@@ -76,28 +68,12 @@
           <span class="queue-prob mono">{{ formatProb(conj.probability) }}</span>
         </div>
       </div>
-
-      <!-- Last action -->
-      <div class="section-label">LAST ACTION</div>
-      <div class="last-action">
-        <span v-if="!lastManeuver" class="action-empty">No actions recorded</span>
-        <div v-else class="action-detail">
-          <div class="action-type" :class="'action-' + (lastManeuver.status || '').toLowerCase()">
-            {{ lastManeuver.status || 'UNKNOWN' }}
-          </div>
-          <div class="action-desc">
-            Conjunction {{ lastManeuver.conjunction_id || '—' }}
-            {{ lastManeuver.duration_ms ? `· ${lastManeuver.duration_ms}ms` : '' }}
-          </div>
-          <div class="action-ts mono">{{ formatTs(lastManeuver.ts) }}</div>
-        </div>
-      </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 
 const props = defineProps({
   agentEnabled: Boolean,
@@ -116,6 +92,15 @@ const emit = defineEmits(['toggleAgent'])
 const scanCountdown = ref(30)
 const resolvedToday = ref(0)
 let scanTimer = null
+
+// (unused helper retained for safe markdown rendering elsewhere)
+function render(t) {
+  const esc = String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  return esc
+    .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+    .replace(/(^|[^*])\*(?!\*)(.+?)\*/g, '$1<i>$2</i>')
+    .replace(/\n/g, '<br>')
+}
 
 watch(
   () => props.agentEnabled,
@@ -255,12 +240,30 @@ function formatTs(ts) {
 
 .advisor-body {
   flex: 1;
-  overflow-y: auto;
+  min-height: 0;
+  overflow: hidden;
   padding: 8px 10px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 7px;
 }
+
+.status-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.strip-stats {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 9px;
+  color: var(--text-dim);
+  letter-spacing: 0.06em;
+}
+.strip-stats .critical { color: var(--color-red); }
 
 /* Status row */
 .status-row {
@@ -491,4 +494,109 @@ function formatTs(ts) {
 }
 
 .mono { font-family: var(--font-mono); }
+
+/* --- Chat console --- */
+.model-tag {
+  font-size: 7px;
+  color: #22d3ee;
+  background: rgba(34, 211, 238, 0.1);
+  border: 1px solid rgba(34, 211, 238, 0.3);
+  border-radius: 3px;
+  padding: 1px 4px;
+  margin-left: 6px;
+  letter-spacing: 0.04em;
+}
+
+.chat-log {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 4px 2px;
+}
+
+.chat-hint {
+  font-size: 9px;
+  color: var(--text-dim);
+  line-height: 1.6;
+  padding: 4px;
+}
+.chat-hint em { color: var(--text-secondary); font-style: normal; }
+
+.chat-msg {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.msg-who {
+  font-family: var(--font-mono);
+  font-size: 7px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 2px 4px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.msg-user .msg-who { color: var(--accent-blue); background: var(--accent-blue-dim); }
+.msg-assistant .msg-who { color: #22d3ee; background: rgba(34, 211, 238, 0.12); }
+
+.msg-text {
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  word-break: break-word;
+}
+.msg-user .msg-text { color: var(--text-primary); }
+.msg-text :deep(b) { color: var(--text-primary); font-weight: 700; }
+
+.typing { display: flex; gap: 3px; padding: 4px 0; }
+.typing span {
+  width: 5px; height: 5px; border-radius: 50%;
+  background: #22d3ee; opacity: 0.5;
+  animation: typing-bounce 1s infinite ease-in-out;
+}
+.typing span:nth-child(2) { animation-delay: 0.15s; }
+.typing span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes typing-bounce { 0%, 60%, 100% { transform: translateY(0); opacity: 0.4; } 30% { transform: translateY(-4px); opacity: 1; } }
+
+.chat-input-row {
+  display: flex;
+  gap: 5px;
+  margin-top: 4px;
+  flex-shrink: 0;
+}
+
+.chat-input {
+  flex: 1;
+  background: var(--bg-panel-3);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: 11px;
+  color: var(--text-primary);
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.chat-input:focus { border-color: #22d3ee; }
+.chat-input::placeholder { color: var(--text-dim); }
+
+.chat-send {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  background: rgba(34, 211, 238, 0.12);
+  border: 1px solid rgba(34, 211, 238, 0.35);
+  border-radius: 4px;
+  color: #22d3ee;
+  transition: all 0.15s;
+}
+.chat-send:hover:not(:disabled) { background: rgba(34, 211, 238, 0.25); box-shadow: 0 0 8px rgba(34, 211, 238, 0.3); }
+.chat-send:disabled { opacity: 0.35; cursor: not-allowed; }
 </style>

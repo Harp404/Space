@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "cesium": "^1.142.0",
+    "marked": "^18.0.5",
     "satellite.js": "^4.1.4",
     "three": "^0.169.0",
     "vite-plugin-cesium": "^1.2.23",

@@ -11,36 +11,56 @@
     <div class="main-grid">
       <div class="globe-col">
         <GlobeView
+          ref="globeRef"
           :satellites="network.satellites"
           :conjunctions="network.conjunctions"
+          :plan="activePlan"
+          :launch-plan="launchPlan"
           @satellite-click="onSatelliteClick"
-        />
-      </div>
-      <div class="right-col">
-        <ConjunctionPanel
-          :conjunctions="network.conjunctions"
-          :leader-name="leaderName"
-          :last-maneuver="lastManeuver"
-          @request-maneuver="requestManeuver"
-          @emergency-override="emergencyOverride"
         />
       </div>
     </div>
 
-    <div class="bottom-row">
-      <NodeCluster
-        :nodes="network.nodes"
-        :leader-id="network.leader_id"
-        @node-control="nodeControl"
-      />
-      <AIAdvisor
-        :agent-enabled="agentEnabled"
+    <!-- Launch trajectory planner — slide-out drawer -->
+    <SideDrawer label="🚀 LAUNCH" :top="688" :width="400" accent="#22d3ee">
+      <LaunchPanel @plan="(p) => (launchPlan = p)" @simulate="globeRef && globeRef.simulateLaunch()" />
+    </SideDrawer>
+
+    <!-- Conjunction Risk Monitor — slide-out drawer -->
+    <SideDrawer label="RISK MONITOR" :top="396" :width="660" accent="#f59e0b">
+      <ConjunctionPanel
         :conjunctions="network.conjunctions"
+        :cdms="network.cdms"
+        :leader-name="leaderName"
         :last-maneuver="lastManeuver"
-        @toggle-agent="toggleAgent"
+        :active-plan="activePlan"
+        :planning-id="planningId"
+        @request-maneuver="requestManeuver"
+        @emergency-override="emergencyOverride"
+        @plan-maneuver="planManeuver"
+        @clear-plan="activePlan = null"
       />
-      <MissionFeed :events="events" />
-    </div>
+    </SideDrawer>
+
+    <!-- Operations deck — slides up from the bottom edge -->
+    <SideDrawer label="▴ OPERATIONS DECK" side="bottom" :height="250" accent="#3b82f6">
+      <div class="bottom-row">
+        <NodeCluster
+          :nodes="network.nodes"
+          :leader-id="network.leader_id"
+          @node-control="nodeControl"
+        />
+        <AIAdvisor
+          :agent-enabled="agentEnabled"
+          :conjunctions="network.conjunctions"
+          :last-maneuver="lastManeuver"
+          @toggle-agent="toggleAgent"
+        />
+        <MissionFeed :events="events" />
+      </div>
+    </SideDrawer>
+
+    <AgentChat @action="onAgentAction" />
 
     <div v-if="resetPending" class="reset-overlay">
       <div class="reset-spinner"></div>
@@ -58,16 +78,64 @@ import ConjunctionPanel from './components/ConjunctionPanel.vue'
 import NodeCluster from './components/NodeCluster.vue'
 import AIAdvisor from './components/AIAdvisor.vue'
 import MissionFeed from './components/MissionFeed.vue'
+import AgentChat from './components/AgentChat.vue'
+import SideDrawer from './components/SideDrawer.vue'
+import LaunchPanel from './components/LaunchPanel.vue'
 
 const network = ref({
   nodes: [],
   satellites: [],
   conjunctions: [],
+  cdms: [],
   leader_id: null,
 })
 
 const events = ref([])
 const lastManeuver = ref(null)
+const activePlan = ref(null)
+const planningId = ref(null)
+const launchPlan = ref(null)
+const globeRef = ref(null)
+
+async function onAgentAction(action) {
+  if (!action) return
+  if (action.type === 'SHOW' && globeRef.value) {
+    await globeRef.value.agentShowConjunction(action.args[0], action.args[1])
+  } else if (action.type === 'REROUTE' && globeRef.value) {
+    await globeRef.value.agentReroute()
+  } else if (action.type === 'TRACK' && globeRef.value) {
+    await globeRef.value.agentTrack(action.args.join(' '))
+  } else if (action.type === 'ZOOM' && globeRef.value) {
+    globeRef.value.agentZoom((action.args[0] || 'in').toLowerCase())
+  } else if (action.type === 'LAUNCH') {
+    const [lat, lon, alt, inc] = action.args.map(Number)
+    try {
+      const res = await fetch('/api/launch/plan', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lat, lon, alt: alt || 550, inc }),
+      })
+      const data = await res.json()
+      if (res.ok && !data.error) launchPlan.value = data
+    } catch { /* ignore */ }
+  }
+}
+
+async function planManeuver(conjunctionId) {
+  planningId.value = conjunctionId
+  activePlan.value = null
+  try {
+    const res = await fetch('/api/maneuver/plan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ conjunction_id: conjunctionId }),
+    })
+    const data = await res.json()
+    if (res.ok) activePlan.value = data
+  } catch (e) {
+    /* ignore */
+  }
+  planningId.value = null
+}
 const wsConnected = ref(false)
 const agentEnabled = ref(false)
 const resetPending = ref(false)
@@ -94,7 +162,19 @@ async function fetchNetwork() {
         nodes: data.nodes || [],
         satellites: data.satellites || [],
         conjunctions: data.conjunctions || [],
+        cdms: data.cdms || [],
         leader_id: data.leader_id || null,
+      }
+      // Seed the mission feed from the REAL conjunctions so it's never empty / fake.
+      if (events.value.length === 0) {
+        ;(data.conjunctions || []).slice(0, 6).forEach((c) =>
+          pushEvent({
+            type: 'CONJUNCTION_ALERT',
+            sat1_name: c.sat1_name, sat2_name: c.sat2_name,
+            risk_index: Math.round(c.risk_index || 0),
+            source: 'SCREEN', timestamp: new Date(),
+          }),
+        )
       }
     }
   } catch (e) {
@@ -128,48 +208,47 @@ function connectWS() {
       }
 
       const type = msg.type || msg.event
+      const p = msg.payload || msg.data || {}   // gateway broadcasts under `payload`
 
       if (type === 'NETWORK_UPDATE') {
-        if (msg.data) {
+        if (p) {
           network.value = {
-            nodes: msg.data.nodes || network.value.nodes,
-            satellites: msg.data.satellites || network.value.satellites,
-            conjunctions: msg.data.conjunctions || network.value.conjunctions,
-            leader_id:
-              msg.data.leader_id !== undefined
-                ? msg.data.leader_id
-                : network.value.leader_id,
+            nodes: p.nodes || network.value.nodes,
+            satellites: p.satellites || network.value.satellites,
+            conjunctions: p.conjunctions || network.value.conjunctions,
+            cdms: p.cdms || network.value.cdms,
+            leader_id: p.leader_id !== undefined ? p.leader_id : network.value.leader_id,
           }
         }
       }
 
       if (type === 'CONJUNCTION_ALERT') {
+        const c = p.conjunction || {}
         pushEvent({
           type: 'CONJUNCTION_ALERT',
-          sat1_name: msg.sat1_name || msg.data?.sat1_name || '—',
-          sat2_name: msg.sat2_name || msg.data?.sat2_name || '—',
-          risk_index: msg.risk_index || msg.data?.risk_index || 0,
+          sat1_name: c.sat1_name || '—',
+          sat2_name: c.sat2_name || '—',
+          risk_index: Math.round(c.risk_index || 0),
+          source: p.source || (p.agent ? 'AGENT' : 'SCREEN'),
           timestamp: new Date(),
         })
       }
 
       if (type === 'MANEUVER_EVENT') {
-        const payload = msg.data || msg
         pushEvent({
           type: 'MANEUVER_EVENT',
-          status: payload.status,
-          conjunction: payload.conjunction_id || payload.conjunction || '',
-          duration_ms: payload.duration_ms,
+          status: p.status,
+          conjunction: p.conjunction_id || p.conjunction || '',
+          trigger: p.trigger,
           timestamp: new Date(),
         })
       }
 
       if (type === 'LEADER_CHANGE') {
-        const payload = msg.data || msg
         pushEvent({
           type: 'LEADER_CHANGE',
-          node_id: payload.node_id || payload.leader_id,
-          node_name: payload.node_name || payload.name || `Node ${payload.node_id}`,
+          node_id: p.node_id || p.new_leader || p.leader_id,
+          node_name: p.node_name || p.name || `Node ${p.node_id || p.new_leader}`,
           timestamp: new Date(),
         })
       }
@@ -413,9 +492,9 @@ button {
 .bottom-row {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
-  height: var(--bottom-h);
-  min-height: var(--bottom-h);
-  border-top: 1px solid var(--border);
+  flex: 1;
+  height: 100%;
+  min-height: 0;
   overflow: hidden;
 }
 
