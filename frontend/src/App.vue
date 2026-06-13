@@ -17,13 +17,20 @@
           :plan="activePlan"
           :launch-plan="launchPlan"
           @satellite-click="onSatelliteClick"
+          @reroute-planned="onReroutePlanned"
+          @launch-clear="launchPlan = null"
         />
       </div>
     </div>
 
     <!-- Launch trajectory planner — slide-out drawer -->
     <SideDrawer label="🚀 LAUNCH" :top="688" :width="400" accent="#22d3ee">
-      <LaunchPanel @plan="(p) => (launchPlan = p)" @simulate="globeRef && globeRef.simulateLaunch()" />
+      <LaunchPanel @plan="onLaunchPlan" @simulate="globeRef && globeRef.simulateLaunch()" />
+    </SideDrawer>
+
+    <!-- History sidebar (left) — saved reroutes + launches -->
+    <SideDrawer label="◷ HISTORY" side="left" :top="380" :width="340" accent="#a855f7">
+      <HistoryPanel :entries="history" @open="openHistory" @delete="deleteHistory" @rename="renameHistory" />
     </SideDrawer>
 
     <!-- Conjunction Risk Monitor — slide-out drawer -->
@@ -81,6 +88,7 @@ import MissionFeed from './components/MissionFeed.vue'
 import AgentChat from './components/AgentChat.vue'
 import SideDrawer from './components/SideDrawer.vue'
 import LaunchPanel from './components/LaunchPanel.vue'
+import HistoryPanel from './components/HistoryPanel.vue'
 
 const network = ref({
   nodes: [],
@@ -96,6 +104,26 @@ const activePlan = ref(null)
 const planningId = ref(null)
 const launchPlan = ref(null)
 const globeRef = ref(null)
+
+// --- History (saved reroutes + launches), persisted to localStorage ---
+const history = ref([])
+try { history.value = JSON.parse(localStorage.getItem('astromesh-history') || '[]') } catch { history.value = [] }
+function persistHistory() { try { localStorage.setItem('astromesh-history', JSON.stringify(history.value.slice(0, 60))) } catch { /* ignore */ } }
+let histSeq = Date.now()
+function addHistory(entry) { history.value.unshift({ id: histSeq++, time: Date.now(), ...entry }); persistHistory() }
+function renameHistory({ id, name }) { const e = history.value.find((x) => x.id === id); if (e) { e.name = name; persistHistory() } }
+function deleteHistory(id) { history.value = history.value.filter((x) => x.id !== id); persistHistory() }
+function openHistory(e) {
+  if (e.type === 'launch') launchPlan.value = e.data
+  else if (e.type === 'reroute') activePlan.value = e.data
+}
+function onLaunchPlan(p) {
+  launchPlan.value = p
+  if (p) addHistory({ type: 'launch', name: `Launch → ${p.target_alt_km} km / ${p.inclination_deg}°`, summary: `az ${p.azimuth_deg}° · Δv ${p.delta_v_kms} km/s · ${p.period_min} min`, data: p })
+}
+function onReroutePlanned(p) {
+  if (p) addHistory({ type: 'reroute', name: `${p.sat1_name} × ${p.sat2_name}`, summary: `miss ${p.original_miss_km}→${p.new_miss_km} km · Δv ${p.total_delta_v_ms} m/s · ${p.clear_vs_catalogue ? 'clear' : 'conflict'}`, data: p })
+}
 
 async function onAgentAction(action) {
   if (!action) return

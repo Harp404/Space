@@ -136,6 +136,7 @@
           >
             {{ planningId === conj.id ? '…' : 'PLAN' }}
           </button>
+          <template v-if="canManeuver(conj)">
           <button
             class="btn-approve"
             :disabled="conj.status === 'APPROVED' || conj.status === 'RESOLVED'"
@@ -157,6 +158,8 @@
               <circle cx="5" cy="5" r="4" stroke="currentColor" stroke-width="1.1"/>
             </svg>
           </button>
+          </template>
+          <span v-else class="deb-tag" title="Both objects are debris / rocket bodies — cannot be commanded to maneuver">DEBRIS</span>
           </template>
         </div>
       </div>
@@ -186,6 +189,10 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['requestManeuver', 'emergencyOverride', 'planManeuver', 'clearPlan'])
+
+// Only LIVE satellites can be commanded to maneuver — debris / rocket bodies cannot.
+function isManeuverable(name) { return !/DEB|R\/B|DEBRIS|COOLANT|WESTFORD|FRAG|PLAT/i.test(name || '') }
+function canManeuver(conj) { return isManeuverable(conj.sat1_name) || isManeuverable(conj.sat2_name) }
 
 // Derive a 0-100 risk index from the operational Pc of a real CDM.
 function riskFromPc(pc) {
@@ -712,4 +719,5 @@ function formatTCA(tca) {
 }
 .btn-plan:hover:not(:disabled) { background: rgba(16, 185, 129, 0.25); box-shadow: 0 0 8px rgba(16, 185, 129, 0.3); }
 .btn-plan:disabled { opacity: 0.5; cursor: wait; }
+.deb-tag { font-family: var(--font-mono); font-size: 8px; font-weight: 700; letter-spacing: 0.06em; color: var(--text-dim); background: rgba(255,255,255,0.05); border: 1px solid var(--border); border-radius: 3px; padding: 3px 6px; white-space: nowrap; }
 </style>

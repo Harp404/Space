@@ -15,7 +15,7 @@
       <div v-if="open" class="sd-backdrop" @click="open = false"></div>
     </transition>
 
-    <transition :name="side === 'bottom' ? 'sd-up' : 'sd-slide'">
+    <transition :name="side === 'bottom' ? 'sd-up' : side === 'left' ? 'sd-slide-left' : 'sd-slide'">
       <aside
         v-if="open"
         class="sd-drawer"
@@ -84,6 +84,18 @@ const open = ref(false)
 .sd-tab-right .sd-tab-label { writing-mode: vertical-rl; text-orientation: mixed; }
 .sd-tab-right:hover { width: 46px; background: color-mix(in srgb, var(--accent) 28%, transparent); }
 
+/* Left-edge tab */
+.sd-tab-left {
+  left: 0;
+  width: 40px;
+  height: 132px;
+  border-left: none;
+  border-radius: 0 8px 8px 0;
+  box-shadow: 0 0 18px color-mix(in srgb, var(--accent) 22%, transparent), 2px 0 12px rgba(0,0,0,0.4);
+}
+.sd-tab-left .sd-tab-label { writing-mode: vertical-rl; text-orientation: mixed; transform: rotate(180deg); }
+.sd-tab-left:hover { width: 46px; background: color-mix(in srgb, var(--accent) 28%, transparent); }
+
 /* Bottom-edge tab — pinned to the bottom-right corner */
 .sd-tab-bottom {
   bottom: 0;
@@ -126,6 +138,14 @@ const open = ref(false)
   border-top: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
   box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.6);
 }
+.sd-drawer-left {
+  top: 0;
+  left: 0;
+  height: 100vh;
+  max-width: 94vw;
+  border-right: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  box-shadow: 10px 0 40px rgba(0, 0, 0, 0.6);
+}
 
 .sd-grip {
   display: flex;
@@ -153,6 +173,8 @@ const open = ref(false)
 
 .sd-slide-enter-active, .sd-slide-leave-active { transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1); }
 .sd-slide-enter-from, .sd-slide-leave-to { transform: translateX(100%); }
+.sd-slide-left-enter-active, .sd-slide-left-leave-active { transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1); }
+.sd-slide-left-enter-from, .sd-slide-left-leave-to { transform: translateX(-100%); }
 .sd-up-enter-active, .sd-up-leave-active { transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1); }
 .sd-up-enter-from, .sd-up-leave-to { transform: translateY(100%); }
 .sd-fade-enter-active, .sd-fade-leave-active { transition: opacity 0.2s; }

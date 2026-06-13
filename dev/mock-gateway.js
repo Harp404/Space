@@ -263,7 +263,8 @@ setInterval(() => {
 // AI agent — every 10 s
 setInterval(() => {
   if (!agentEnabled) return;
-  const monitoring = conjunctions.filter(c => c.status === 'MONITORING');
+  // Only act on conjunctions with a LIVE satellite — debris can't be commanded.
+  const monitoring = conjunctions.filter(c => c.status === 'MONITORING' && (isManeuverable(c.sat1_name) || isManeuverable(c.sat2_name)));
   if (monitoring.length === 0) return;
   const top = monitoring.reduce((a, b) => (a.risk_index >= b.risk_index ? a : b));
   if (top.risk_index > 70 && top.status === 'MONITORING') {

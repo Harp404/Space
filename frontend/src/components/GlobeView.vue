@@ -130,6 +130,12 @@
       </div>
     </div>
 
+    <!-- Launch on-globe controls -->
+    <div v-if="launchActive" class="reroute-actions">
+      <button class="reroute-btn2 launch" @click="simulateLaunch">▶ SIMULATE LAUNCH</button>
+      <button class="reroute-btn2 back" @click="exitLaunch">↩ EXIT LAUNCH</button>
+    </div>
+
     <!-- Hover tooltip over a route line -->
     <div v-if="routeTip" class="route-tip" :style="{ left: routeTip.x + 14 + 'px', top: routeTip.y + 14 + 'px', borderColor: routeTip.css }">
       <div class="rt-sat" :style="{ color: routeTip.css }">{{ shortName(routeTip.sat) }}</div>
@@ -179,7 +185,7 @@ const props = defineProps({
   launchPlan: { type: Object, default: null },  // active launch trajectory to draw + animate
 })
 
-const emit = defineEmits(['satellite-click'])
+const emit = defineEmits(['satellite-click', 'reroute-planned', 'launch-clear'])
 const cesiumContainer = ref(null)
 const trackedSat = ref(null)   // the satellite the camera is currently following
 const trackInfo = ref(null)    // live readout (lat/lon/alt/speed) for the tracked sat
@@ -1067,12 +1073,14 @@ watch(() => props.plan, (p) => { if (viewer) (p ? drawPlan(p) : clearPlan()) })
 const launchEntities = []
 let launchTimer = null, launchRocket = null
 const launchHud = reactive({ active: false, phase: '', speed: '0', alt: '0', eta: '', orbits: 0 })
+const launchActive = ref(false)
 function clearLaunch() {
   if (launchTimer) { clearInterval(launchTimer); launchTimer = null }
   for (const e of launchEntities) viewer.entities.remove(e)
   launchEntities.length = 0; launchRocket = null
-  launchHud.active = false
+  launchHud.active = false; launchActive.value = false
 }
+function exitLaunch() { clearLaunch(); currentLaunch = null; emit('launch-clear'); if (viewer) viewer.camera.flyHome(1.2) }
 let currentLaunch = null
 function drawLaunch(p) {
   clearLaunch()
@@ -1097,6 +1105,7 @@ function drawLaunch(p) {
     label: { text: '▲ VEHICLE', font: '700 10px ui-monospace, monospace', fillColor: Cesium.Color.WHITE, showBackground: true, backgroundColor: Cesium.Color.fromCssColorString('#f59e0b').withAlpha(0.9), pixelOffset: new Cesium.Cartesian2(0, -16), disableDepthTestDistance: Number.POSITIVE_INFINITY },
   })
   launchEntities.push(launchRocket)
+  launchActive.value = true
   if (viewer) viewer.flyTo(launchEntities, { duration: 1.6 }).catch(() => {})
 }
 // Run the real-physics ascent simulation (separate, optional step after PLAN).
@@ -1151,7 +1160,7 @@ async function planReroute() {
       body: JSON.stringify({ conjunction_id: selectedConj.value.id }),
     })
     const data = await res.json()
-    if (res.ok && !data.error) { planResult.value = data; drawPlan(data) }
+    if (res.ok && !data.error) { planResult.value = data; drawPlan(data); emit('reroute-planned', data) }
   } catch { /* ignore */ }
   planning.value = false
 }
@@ -1544,11 +1553,11 @@ onUnmounted(() => {
 /* Left-edge tab for the conjunctions sidebar */
 .conj-tab {
   position: absolute;
-  top: 130px;
+  top: 120px;
   left: 0;
   z-index: 7;
   width: 40px;
-  height: 150px;
+  height: 132px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1654,6 +1663,8 @@ onUnmounted(() => {
 .reroute-btn2:disabled { opacity: 0.85; cursor: wait; }
 .reroute-btn2.back { border-color: #5f7e9f; color: #cdd9e6; box-shadow: 0 8px 24px rgba(0,0,0,0.7); }
 .reroute-btn2.back:hover { background: rgba(30, 42, 60, 0.98); border-color: #9fb6d0; }
+.reroute-btn2.launch { border-color: #f59e0b; color: #ffe6bd; box-shadow: 0 0 20px rgba(245,158,11,0.5), 0 8px 24px rgba(0,0,0,0.7); }
+.reroute-btn2.launch:hover { background: rgba(58, 40, 12, 0.98); box-shadow: 0 0 30px rgba(245,158,11,0.8), 0 8px 24px rgba(0,0,0,0.7); }
 
 .reroute-card {
   position: fixed;
