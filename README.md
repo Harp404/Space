@@ -6,8 +6,7 @@ A real-time digital twin of orbit that screens the **entire ~31,000-object catal
 
 > Built for **FAR AWAY 2026** · Themes: **Space & Aerospace** · **Agentic & Autonomous Systems** · **Logistics & Transit (orbital traffic management)**
 
-### 🔴 [**Live demo → astromesh.onrender.com**](https://astromesh.onrender.com)
-*Free-tier host — the first load may take ~1–2 minutes to wake and warm the live catalogue, then it's fully interactive.*
+> **Run it locally in 2 minutes** — see [▶️ Run it](#️-run-it) below. (No hosted demo: AstroMesh is a live engine that fetches the real Space-Track catalogue, so it runs best from your own machine with your free API keys.)
 
 ![AstroMesh — live orbital digital twin](docs/img/01-hero.png)
 
