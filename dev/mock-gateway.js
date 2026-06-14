@@ -550,6 +550,19 @@ And to move the camera, append one of:
 <<ZOOM|IN>>  <<ZOOM|OUT>>  <<ZOOM|RESET>>
 Emit a directive ONLY when the user actually requests that action, and keep it on its own final line. Still give a short normal sentence before the directive. For a single object the user names (e.g. "zoom on FENGYUN 1C DEB"), use <<TRACK|FENGYUN 1C DEB>> — do NOT turn it into a conjunction.`;
 
+async function groqOnce(messages, maxTokens) {
+  const body = JSON.stringify({ model: GROQ_MODEL, messages, temperature: 0.4, max_tokens: maxTokens, reasoning_effort: 'low' });
+  const res = await httpsRequest({
+    hostname: 'api.groq.com', path: '/openai/v1/chat/completions', method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${GROQ_API_KEY}`, 'Content-Length': Buffer.byteLength(body) },
+  }, body);
+  if (res.status !== 200) throw new Error(`Groq API ${res.status}: ${res.body.slice(0, 200)}`);
+  const j = JSON.parse(res.body);
+  const choice = j.choices?.[0];
+  // Reasoning models sometimes put text in `reasoning` when `content` is empty.
+  return (choice?.message?.content || choice?.message?.reasoning || '').trim();
+}
+
 async function groqChat(userMessages) {
   if (!GROQ_API_KEY) throw new Error('GROQ_API_KEY not set in .env');
   const messages = [
@@ -558,14 +571,16 @@ async function groqChat(userMessages) {
     ...userMessages,
   ];
   // gpt-oss is a reasoning model — give it room so `content` isn't starved by reasoning tokens.
-  const body = JSON.stringify({ model: GROQ_MODEL, messages, temperature: 0.4, max_tokens: 1500, reasoning_effort: 'low' });
-  const res = await httpsRequest({
-    hostname: 'api.groq.com', path: '/openai/v1/chat/completions', method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${GROQ_API_KEY}`, 'Content-Length': Buffer.byteLength(body) },
-  }, body);
-  if (res.status !== 200) throw new Error(`Groq API ${res.status}: ${res.body.slice(0, 200)}`);
-  const j = JSON.parse(res.body);
-  return j.choices?.[0]?.message?.content || '(no response)';
+  let reply = await groqOnce(messages, 2200);
+  // Sometimes the whole budget goes to reasoning and content comes back empty.
+  // Retry once with a bigger budget + an explicit nudge to answer directly.
+  if (!reply) {
+    reply = await groqOnce(
+      [...messages, { role: 'system', content: 'Reply now with a short direct answer to the user (and any <<ACTION>> tag if relevant). Do not overthink.' }],
+      3000,
+    );
+  }
+  return reply || "I didn't catch that — try rephrasing, e.g. \"track Hubble\" or \"zoom in\".";
 }
 
 // Log in to Space-Track and run one query (returns the response body).

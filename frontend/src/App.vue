@@ -74,8 +74,8 @@
       <div v-if="appLoading" class="boot">
         <div class="boot-logo">ASTRO<span>MESH</span></div>
         <div class="boot-bar"><div class="boot-bar-fill" :style="{ width: bootProgress + '%' }"></div></div>
-        <div class="boot-text">INITIALIZING ORBITAL PICTURE… {{ bootProgress }}%</div>
-        <div class="boot-sub">streaming Earth · loading models · screening conjunctions</div>
+        <div class="boot-text">DOWNLOADING ASSETS… {{ bootProgress }}%</div>
+        <div class="boot-sub">{{ bootPhase }}</div>
       </div>
     </transition>
 
@@ -123,17 +123,27 @@ const LIGHT_MODELS = [
 ]
 const BOOT_TOTAL = LIGHT_MODELS.length + 1   // +1 = globe ready
 let bootSteps = 0
+const bootPhase = ref('connecting to gateway…')
+let globeIsReady = false
 function bootStep() {
   bootSteps++
   bootProgress.value = Math.min(100, Math.round((bootSteps / BOOT_TOTAL) * 100))
-  if (bootSteps >= BOOT_TOTAL) setTimeout(() => (appLoading.value = false), 450)
+  if (!globeIsReady) bootPhase.value = 'caching 3D models…'
+  if (bootSteps >= BOOT_TOTAL) {
+    bootPhase.value = 'orbital picture ready'
+    // small beat so the bar visibly hits 100% before the reveal
+    setTimeout(() => (appLoading.value = false), 500)
+  }
 }
-function onGlobeReady() { bootStep() }
+function onGlobeReady() { globeIsReady = true; bootPhase.value = 'screening conjunctions…'; bootStep() }
 onMounted(() => {
+  bootPhase.value = 'caching 3D models…'
+  // Download (and browser-cache) every model up front so nothing pops in later.
   LIGHT_MODELS.forEach((u) => fetch(u).then((r) => r.arrayBuffer()).catch(() => {}).finally(bootStep))
 })
-// Safety: never hang the loader.
-setTimeout(() => { if (appLoading.value) appLoading.value = false }, 15000)
+// Safety net: free-tier hosts stream assets slowly, so give it room (60s) before
+// force-revealing — better a longer honest loader than a half-loaded scene.
+setTimeout(() => { if (appLoading.value) { bootProgress.value = 100; appLoading.value = false } }, 60000)
 const globeRef = ref(null)
 
 // --- History (saved reroutes + launches), persisted to localStorage ---

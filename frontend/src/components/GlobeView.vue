@@ -727,15 +727,20 @@ async function buildSats() {
     if (!satEntities.has(sat.id)) makeSatEntity(sat)
   }
   applyFilters()
-  const wanted = props.satellites.map(s => s.norad_id).filter(Boolean)
+  // PRIMARY orbit source: the full Space-Track catalogue served by our own
+  // gateway (/api/catalogue). It registers an SGP4 satrec for every object —
+  // including all curated NORADs — so satellites move immediately. This works
+  // in production where the public CelesTrak endpoint is blocked/unreachable.
+  await ensureCatalogue()
+  // FALLBACK only for any seed sat the catalogue somehow missed: try CelesTrak
+  // (gracefully no-ops in production where the proxy is blocked).
   for (const group of SEED_GROUPS) {
-    await loadGroupForNorads(group, wanted)   // sequential = gentle on CelesTrak
+    if (props.satellites.some(s => s.norad_id && !hasRealOrbit(s.norad_id))) {
+      try { await loadGroupForNorads(group, props.satellites.map(s => s.norad_id).filter(Boolean)) } catch {}
+    }
   }
-  // Any seed sat the groups didn't cover (e.g. early Starlink not in the curated
-  // group feed, debris/rocket bodies) → fetch its TLE individually so it too
-  // gets a real SGP4 orbit and moves smoothly instead of jumping on gateway polls.
   for (const sat of props.satellites) {
-    if (sat.norad_id && !hasRealOrbit(sat.norad_id)) await loadByNorad(sat.norad_id)
+    if (sat.norad_id && !hasRealOrbit(sat.norad_id)) { try { await loadByNorad(sat.norad_id) } catch {} }
   }
 }
 
@@ -1230,9 +1235,19 @@ async function agentTrack(query) {
 function agentZoom(dir) {
   if (!viewer) return
   const cam = viewer.camera
-  if (dir === 'reset' || dir === 'home') cam.flyHome(1.2)
-  else if (dir === 'out') cam.zoomOut(cam.positionCartographic.height * 0.6 + 1e6)
-  else cam.zoomIn(cam.positionCartographic.height * 0.4 + 5e5)   // 'in'
+  if (dir === 'reset' || dir === 'home') { cam.flyHome(1.4); return }
+  // Smooth animated zoom (zoomIn/zoomOut are instant → looked abrupt). Fly to the
+  // same ground point at a new height, preserving the current view angle.
+  const carto = cam.positionCartographic.clone()
+  const h = carto.height
+  const nh = dir === 'out'
+    ? Math.min(h * 2.0 + 1e6, 4.5e7)        // wider view (capped near whole-Earth)
+    : Math.max(h * 0.45, 4e5)               // closer view (capped ~400 km)
+  cam.flyTo({
+    destination: Cesium.Cartesian3.fromRadians(carto.longitude, carto.latitude, nh),
+    orientation: { heading: cam.heading, pitch: cam.pitch, roll: cam.roll },
+    duration: 1.1,
+  })
 }
 function drawConjunctions(list) {
   clearConjunctions()
