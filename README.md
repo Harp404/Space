@@ -6,6 +6,9 @@ A real-time digital twin of orbit that screens the **entire ~31,000-object catal
 
 > Built for **FAR AWAY 2026** · Themes: **Space & Aerospace** · **Agentic & Autonomous Systems** · **Logistics & Transit (orbital traffic management)**
 
+### 🔴 [**Live demo → astromesh.onrender.com**](https://astromesh.onrender.com)
+*Free-tier host — the first load may take ~1–2 minutes to wake and warm the live catalogue, then it's fully interactive.*
+
 ![AstroMesh — live orbital digital twin](docs/img/01-hero.png)
 
 ---

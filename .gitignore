@@ -55,3 +55,6 @@ tmp/
 # Stray model downloads in repo root (real models live in frontend/public/models)
 /*.glb
 /*.gltf
+
+# demo video (large build artifact, don't commit)
+*.mp4
