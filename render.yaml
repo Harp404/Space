@@ -13,6 +13,14 @@ services:
     envVars:
       - key: GROQ_MODEL
         value: openai/gpt-oss-120b
+      # Frontend (Vite) build-time tokens — inlined into the bundle at `npm run build`.
+      # These are client-side by nature (visible in F12); scope them in their dashboards.
+      - key: VITE_CESIUM_TOKEN
+        sync: false
+      - key: VITE_OWM_KEY
+        sync: false
+      - key: VITE_GMAPS_KEY
+        sync: false
       # Set these in the dashboard (Environment tab) — do NOT hardcode:
       - key: SPACETRACK_IDENTITY
         sync: false
