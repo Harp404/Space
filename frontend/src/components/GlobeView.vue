@@ -1499,7 +1499,16 @@ function trackSat(sat) {
   }
 
   const FLY_MS = 1800
-  const pose = sampled ? poseFromProp(sampled, FLY_MS, vf) : null
+  let pose = sampled ? poseFromProp(sampled, FLY_MS, vf) : null
+  // Fallback: if the velocity-frame pose couldn't be built (no sampled orbit), still
+  // fly in smoothly — offset radially-back from the object and look at it.
+  if (!pose && smoothPos) {
+    const radial = Cesium.Cartesian3.normalize(smoothPos, new Cesium.Cartesian3())
+    const dist = Cesium.Cartesian3.magnitude(vf) || 600000
+    const dest = Cesium.Cartesian3.add(smoothPos, Cesium.Cartesian3.multiplyByScalar(radial, dist, new Cesium.Cartesian3()), new Cesium.Cartesian3())
+    const dir = Cesium.Cartesian3.normalize(Cesium.Cartesian3.subtract(smoothPos, dest, new Cesium.Cartesian3()), new Cesium.Cartesian3())
+    pose = { dest, dir, up: radial }
+  }
   if (!smoothPos || !pose) { attach(); return }
   viewer.camera.flyTo({
     destination: pose.dest,
