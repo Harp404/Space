@@ -168,6 +168,29 @@ docker-compose up                 # 4 Go nodes: Bully election + maneuver consen
 
 ---
 
+## 🔮 Roadmap — what's next
+
+AstroMesh is built as a foundation. The screening engine, consensus layer, and digital twin are designed to extend directly into a production space-traffic-management platform:
+
+**Accuracy & physics**
+- **Full covariance-based Pc** — ingest real CDM covariance matrices and compute collision probability with the full Foster / Alfano method (not just screening-grade).
+- **Machine-learning trajectory prediction** — learn per-object drag/maneuver behaviour to refine TLE-only forecasts and flag anomalous orbit changes.
+- **Atmospheric-drag & re-entry prediction** — model decay and predict re-entry windows for debris and dead satellites.
+
+**Coordination & autonomy**
+- **Live multi-operator collaboration** — real per-operator WebSocket rooms so ISRO, ESA, JAXA, and commercial operators negotiate maneuvers against each other in real time.
+- **Constellation-scale deconfliction** — coordinate whole constellations (Starlink/OneWeb-class) as a fleet, not object-by-object.
+- **On-chain audit trail** — anchor every consensus decision to an immutable ledger for a truly trustless, auditable coordination record.
+- **Direct telemetry ingestion** — accept live ephemeris feeds from operators for sub-kilometre, operational-grade positions.
+
+**Platform & reach**
+- **Automated maneuver execution hooks** — push approved burns to operator flight-software APIs (with human-in-the-loop).
+- **Economic & insurance risk scoring** — per-asset collision-risk pricing for the space-insurance market.
+- **Launch rideshare window optimiser** — find optimal launch windows and insertion slots into the least-congested shells.
+- **Mobile + AR view** — inspect the live orbital picture on phone and in augmented reality.
+
+---
+
 ## 🔭 Honest limitations
 - Public-TLE miss-distance is **screening-grade** (no covariance); operational fidelity comes from the CDM layer.
 - **APPROVED** = the coordination decision, not a command to real hardware.
