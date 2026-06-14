@@ -1,0 +1,26 @@
+# Render deploy — single service (gateway serves frontend + /api + /ws, all same-origin).
+# Secrets are set in the Render dashboard, never committed.
+services:
+  - type: web
+    name: astromesh
+    runtime: node
+    plan: free
+    # Installs frontend deps (incl. satellite.js used by the gateway) and builds the Vue app.
+    buildCommand: cd frontend && npm install && npm run build
+    startCommand: node dev/mock-gateway.js
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-120b
+      # Set these in the dashboard (Environment tab) — do NOT hardcode:
+      - key: SPACETRACK_IDENTITY
+        sync: false
+      - key: SPACETRACK_PASSWORD
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      # After first deploy, set this to your live URL to lock CORS, e.g.
+      #   https://astromesh.onrender.com
+      - key: ALLOWED_ORIGINS
+        sync: false

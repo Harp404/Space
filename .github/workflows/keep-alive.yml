@@ -1,0 +1,13 @@
+name: Keep Render awake
+# Pings /health every ~14 min so the free Render web service never spins down.
+# NOTE: edit the URL below to your real Render URL after the first deploy.
+on:
+  schedule:
+    - cron: '*/14 * * * *'
+  workflow_dispatch: {}        # lets you trigger it manually too
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping health endpoint
+        run: curl -fsS https://astromesh.onrender.com/health || true

@@ -13,12 +13,34 @@ const https = require('https');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const path_ = path;                       // alias: `path` is shadowed inside handleRequest
 const { URL } = require('url');
+
+// Built frontend dir (single-origin serving). Set SERVE_FRONTEND=0 to disable.
+const DIST_DIR = process.env.SERVE_FRONTEND === '0'
+  ? null
+  : path.join(__dirname, '..', 'frontend', 'dist');
+const MIME = {
+  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript',
+  '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml',
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp',
+  '.gif': 'image/gif', '.ico': 'image/x-icon', '.glb': 'model/gltf-binary',
+  '.gltf': 'model/gltf+json', '.bin': 'application/octet-stream', '.wasm': 'application/wasm',
+  '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.txt': 'text/plain',
+};
+function sendFile(res, filePath) {
+  const ext = path_.extname(filePath).toLowerCase();
+  const type = MIME[ext] || 'application/octet-stream';
+  // hash-named build assets are immutable; cache hard. index.html stays fresh.
+  const cache = filePath.endsWith('index.html') ? 'no-cache' : 'public, max-age=31536000, immutable';
+  res.writeHead(200, { 'Content-Type': type, 'Cache-Control': cache });
+  fs.createReadStream(filePath).pipe(res);
+}
 // Reuse the frontend's installed SGP4 lib for real conjunction screening.
 let satLib = null;
 try { satLib = require(path.join(__dirname, '..', 'frontend', 'node_modules', 'satellite.js')); } catch { /* optional */ }
 
-const PORT = 8090;
+const PORT = process.env.PORT || 8090;
 
 // ---------------------------------------------------------------------------
 // Minimal .env loader (no deps) — loads repo-root .env into process.env
@@ -311,10 +333,33 @@ setTimeout(() => {
 // HTTP helpers
 // ---------------------------------------------------------------------------
 
+// Comma-separated list in env, e.g. "https://astromesh.onrender.com,https://astromesh.web.app"
+// Defaults to "*" (open) for local dev. Set ALLOWED_ORIGINS in production to lock it down.
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '*')
+  .split(',').map((s) => s.trim()).filter(Boolean);
+
 function cors(res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  const origin = res._reqOrigin;
+  if (ALLOWED_ORIGINS.includes('*')) {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  } else if (origin && ALLOWED_ORIGINS.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+  }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+}
+
+// ---- simple in-memory per-IP rate limiter (protects the paid Groq endpoint) ----
+const _rlHits = new Map();
+function rateLimited(req, max, windowMs) {
+  const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim()
+    || (req.socket && req.socket.remoteAddress) || 'unknown';
+  const now = Date.now();
+  const arr = (_rlHits.get(ip) || []).filter((t) => now - t < windowMs);
+  arr.push(now);
+  _rlHits.set(ip, arr);
+  return arr.length > max;
 }
 
 function json(res, status, body) {
@@ -1195,6 +1240,7 @@ async function handleRequest(req, res) {
   const parsed = new URL(req.url, `http://localhost:${PORT}`);
   const path   = parsed.pathname;
   const method = req.method.toUpperCase();
+  res._reqOrigin = req.headers.origin;   // used by cors() for the allow-list
 
   // Preflight
   if (method === 'OPTIONS') {
@@ -1272,6 +1318,8 @@ async function handleRequest(req, res) {
   // ---- POST routes ----
 
   if (method === 'POST' && path === '/api/chat') {
+    // 20 AI calls / minute / IP — stops anyone draining the Groq key via the public URL
+    if (rateLimited(req, 20, 60000)) return json(res, 429, { error: 'Too many requests, slow down.' });
     const body = await readBody(req);
     const msgs = Array.isArray(body.messages) ? body.messages
       : (body.message ? [{ role: 'user', content: String(body.message) }] : []);
@@ -1390,6 +1438,36 @@ async function handleRequest(req, res) {
     seedState();
     broadcast('NETWORK_UPDATE', fullState());
     return json(res, 200, { status: 'reset', leader_id: leaderId });
+  }
+
+  // ---- /celestrak proxy (so the browser never calls celestrak.org directly) ----
+  if (method === 'GET' && path.startsWith('/celestrak/')) {
+    const target = 'https://celestrak.org/' + path.slice('/celestrak/'.length) + (parsed.search || '');
+    https.get(target, (up) => {
+      cors(res);
+      res.writeHead(up.statusCode || 200, { 'Content-Type': up.headers['content-type'] || 'text/plain' });
+      up.pipe(res);
+    }).on('error', (e) => json(res, 502, { error: 'celestrak proxy failed', detail: e.message }));
+    return;
+  }
+
+  // ---- static frontend (single-origin: serves the built Vue app) ----
+  if (method === 'GET' && DIST_DIR) {
+    const rel = path === '/' ? 'index.html' : path.replace(/^\/+/, '');
+    const filePath = path_.join(DIST_DIR, rel);
+    // block path traversal
+    if (filePath.startsWith(DIST_DIR)) {
+      try {
+        if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+          return sendFile(res, filePath);
+        }
+      } catch (_) {}
+      // SPA fallback: any unknown non-API path -> index.html
+      if (!path.startsWith('/api') && !path.startsWith('/control') && !path.startsWith('/celestrak')) {
+        const idx = path_.join(DIST_DIR, 'index.html');
+        if (fs.existsSync(idx)) return sendFile(res, idx);
+      }
+    }
   }
 
   // 404
