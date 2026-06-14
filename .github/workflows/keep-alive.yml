@@ -1,13 +1,16 @@
-name: Keep Render awake
-# Pings /health every ~14 min so the free Render web service never spins down.
-# NOTE: edit the URL below to your real Render URL after the first deploy.
+name: Keep HF Space awake
+# Pings the live Hugging Face Space so the free tier never pauses (it sleeps
+# after ~48h of no traffic). Every 6 hours gives a safe margin even if GitHub's
+# scheduler is delayed. Manual run available via "Run workflow".
 on:
   schedule:
-    - cron: '*/14 * * * *'
-  workflow_dispatch: {}        # lets you trigger it manually too
+    - cron: '0 */6 * * *'      # every 6 hours
+  workflow_dispatch: {}
 jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping health endpoint
-        run: curl -fsS https://astromesh.onrender.com/health || true
+      - name: Ping the Space
+        run: |
+          curl -fsS -m 60 https://harp404-space.hf.space/health || true
+          curl -fsS -m 60 https://harp404-space.hf.space/ -o /dev/null || true
