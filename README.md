@@ -6,7 +6,7 @@ colorTo: blue
 sdk: docker
 app_port: 7860
 pinned: false
-short_description: Constraint-aware orbital traffic control — four-state completion signal
+short_description: Constraint-aware orbital traffic control
 ---
 
 # 🛰️ AstroMesh
