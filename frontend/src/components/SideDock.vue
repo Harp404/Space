@@ -107,8 +107,20 @@ function shortCap(t) {
 
 const active = ref(props.initial)
 const current = computed(() => props.tabs.find((t) => t.key === active.value) || {})
-function toggle(k) { active.value = active.value === k ? null : k }
-defineExpose({ open: (k) => { active.value = k }, close: () => { active.value = null } })
+const emit = defineEmits(['change'])
+function toggle(k) {
+  const next = active.value === k ? null : k
+  const prev = active.value
+  active.value = next
+  // A tab can paint on the globe (the story draws a corridor and the whole
+  // land-cover layer). Leaving it must undo that, or the globe stays stuck on
+  // the last tab's scene while a different panel is open.
+  emit('change', { from: prev, to: next })
+}
+defineExpose({
+  open: (k) => { const p = active.value; active.value = k; emit('change', { from: p, to: k }) },
+  close: () => { const p = active.value; active.value = null; emit('change', { from: p, to: null }) },
+})
 </script>
 
 <style scoped>

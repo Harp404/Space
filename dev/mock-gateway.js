@@ -1515,16 +1515,28 @@ function keplerUniversal(r0v, v0v, dt) {
 
 let _satrecMap = null;
 function satrecByNorad(norad) {
-  if (!_satrecMap) {
+  // Two live failure modes on a fresh deploy:
+  //
+  //   1. dev/cache/catalogue.3le is fetched at RUNTIME and is not in the repo,
+  //      so a cold host had no TLE source and every avoidance plan failed with
+  //      "TLE not found for one of the objects".
+  //   2. The map was cached even when it came out EMPTY, so once it failed it
+  //      never retried — not even after Space-Track delivered the catalogue.
+  //
+  // Fall back to the bundled snapshot, and never cache an empty result.
+  if (!_satrecMap || _satrecMap.size === 0) {
     _satrecMap = new Map();
-    try {
-      const lines = fs.readFileSync(CATALOGUE_FILE, 'utf8').split('\n').map((l) => l.replace(/\r$/, ''));
-      for (let i = 0; i + 2 < lines.length; i += 3) {
-        const l1 = lines[i + 1], l2 = lines[i + 2];
-        if (!l1 || !l1.startsWith('1 ') || !l2 || !l2.startsWith('2 ')) continue;
-        const n = parseInt(l2.substring(2, 7)); if (n) _satrecMap.set(n, { l1, l2 });
-      }
-    } catch { /* catalogue not ready */ }
+    for (const src of [CATALOGUE_FILE, path.join(SNAPSHOT.SNAP, 'catalogue.3le')]) {
+      if (_satrecMap.size) break;
+      try {
+        const lines = fs.readFileSync(src, 'utf8').split('\n').map((l) => l.replace(/\r$/, ''));
+        for (let i = 0; i + 2 < lines.length; i += 3) {
+          const l1 = lines[i + 1], l2 = lines[i + 2];
+          if (!l1 || !l1.startsWith('1 ') || !l2 || !l2.startsWith('2 ')) continue;
+          const n = parseInt(l2.substring(2, 7)); if (n) _satrecMap.set(n, { l1, l2 });
+        }
+      } catch { /* try the next source */ }
+    }
   }
   const e = _satrecMap.get(norad);
   if (!e) return null;

@@ -40,7 +40,8 @@ dev/cache/epochs.json
 dev/cache/satcat-rcs.json
 dev/cache/reentry-feed.json
 dev/cache/starlink/
-dev/cache/snapshot/
+dev/cache/snapshot/*
+!dev/cache/snapshot/catalogue.3le
 # The trained/derived artefacts (dense-consequence, exposure, sheltering,
 # models/*.json) are IN the repo on purpose — they are the output of the GPU
 # runs and the demo depends on them.

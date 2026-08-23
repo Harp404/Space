@@ -11,6 +11,7 @@
     <div class="main-grid">
     <SideDock
       ref="dockRef"
+      @change="onTabChange"
       :tabs="dockTabs"
       initial="signal"
       :signal="fleetSignal && fleetSignal.signal"
@@ -185,7 +186,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, onErrorCaptured } from 'vue'
 import { WS_URL } from './config.js'
 import TheHeader from './components/TheHeader.vue'
 import GlobeView from './components/GlobeView.vue'
@@ -248,6 +249,20 @@ function bootStep() {
   }
 }
 function onGlobeReady() { globeIsReady = true; bootPhase.value = 'screening conjunctions…'; bootStep() }
+/**
+ * A render error in one panel used to blank the whole tab with no message —
+ * you switched to Storms and got an empty box, and only a reload fixed it.
+ * Vue swallows the error and unmounts the subtree; catching it here keeps the
+ * rest of the app alive and says what happened instead of showing nothing.
+ */
+onErrorCaptured((err, instance, info) => {
+  const where = (instance && instance.$options && instance.$options.__name) || 'a panel'
+  console.error('[panel error]', where, info, err)
+  pushToast('refused', `${String(where).toUpperCase()} FAILED TO RENDER`,
+    `${String(err.message || err).slice(0, 120)} — switch tabs and back, or reload.`)
+  return false   // stop it propagating and tearing down more of the tree
+})
+
 onMounted(() => {
   bootPhase.value = 'caching 3D models…'
   // Download (and browser-cache) every model up front so nothing pops in later.
@@ -606,6 +621,28 @@ async function requestManeuver(conjunctionId) {
 
 /** The Long March 5B re-entry, evaluated by the live rulebook. */
 /** The story wants the corridor AND the planet-wide ground layer. */
+/**
+ * Leaving a tab undoes what that tab painted.
+ *
+ * The story tab draws a re-entry corridor and turns on the planet-wide land
+ * cover. Without this the globe stayed frozen on that scene while the user was
+ * looking at Risk or Storms, which read as the app being stuck.
+ */
+function onTabChange({ from, to }) {
+  if (from === 'story' && to !== 'story') {
+    deorbitPlan.value = null          // clears corridor, ground strip, descent
+    if (globeRef.value) {
+      if (globeRef.value.stopFollowing) globeRef.value.stopFollowing()
+      if (globeRef.value.hideGlobalGround) globeRef.value.hideGlobalGround()
+      if (globeRef.value.agentZoom) globeRef.value.agentZoom('reset')
+    }
+  }
+  // Leaving Risk stops an approach replay that would otherwise hold the camera.
+  if (from === 'risk' && to !== 'risk' && globeRef.value && globeRef.value.stopApproach) {
+    globeRef.value.stopApproach()
+  }
+}
+
 async function showStoryOnGlobe() {
   await showLongMarch()
   if (globeRef.value && globeRef.value.showGlobalGround) globeRef.value.showGlobalGround()

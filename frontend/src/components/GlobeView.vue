@@ -1636,6 +1636,10 @@ async function showGlobalGround() {
   if (!globalGroundLayer) await toggleGlobalGround()
 }
 
+function hideGlobalGround() {
+  if (globalGroundLayer) toggleGlobalGround()
+}
+
 async function toggleGlobalGround() {
   if (globalGroundLayer) {
     viewer.imageryLayers.remove(globalGroundLayer, true)
@@ -2221,7 +2225,7 @@ function simulateLaunch() {
   }, 40)
 }
 watch(() => props.launchPlan, (p) => { if (viewer) (p ? drawLaunch(p) : (currentLaunch = null, clearLaunch())) })
-defineExpose({ agentShowConjunction, agentReroute, simulateLaunch, agentTrack, agentZoom, playApproach, stopApproach, showGlobalGround })
+defineExpose({ agentShowConjunction, agentReroute, simulateLaunch, agentTrack, agentZoom, playApproach, stopApproach, showGlobalGround, hideGlobalGround })
 
 // --- Reroute planning from the left "predicted close approaches" panel ---
 const selectedConj = ref(null)
