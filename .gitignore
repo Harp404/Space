@@ -93,3 +93,8 @@ ml/*.log
 
 # raw dense artefact stays local — the .gz ships (53 MB -> 2 MB, HF hard-limits plain files at 10 MB)
 dev/cache/dense-consequence.json
+
+# Captured demo frames (regenerate with demo/capture.js)
+demo/frames/
+demo/probe.png
+demo/*.mp4
