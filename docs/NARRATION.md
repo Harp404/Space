@@ -1,113 +1,130 @@
 # AstroMesh — narration
 
-*Spoken text only. Roughly two and a half minutes.*
-*Every claim below is visible on screen when it is said.*
+*Spoken text only. About two and a half minutes.*
 
 ---
 
 **[Boot / globe]**
 
-AstroMesh screens thirty-one thousand tracked objects against the real
-catalogue for collisions.
+AstroMesh is a collision-avoidance system for satellites. It screens about
+thirty-one thousand tracked objects against the real catalogue.
 
-Watch the top left. It says blocked. Not error — blocked. Something is
-outstanding, and nothing gets authorised until it is resolved.
+The panel on the left shows the current state of the system, and right now it
+says BLOCKED. That means there is outstanding work, and the system will not
+authorise any manoeuvre until that work is resolved.
 
-Every irreversible action here passes a gate, and the gate answers in four
-states: complete, partial, blocked, unresolved.
+For this round we added a constraint gate. Every irreversible action has to
+pass through it, and it reports one of four states: complete, partial, blocked,
+or unresolved.
 
 ---
 
 **[Risk tab → VOTE]**
 
-A real conjunction, put to the operator vote.
+This is a real conjunction between two objects. I'll put it to the operator
+vote.
 
-Refused — and the reasons are named. Flight Rule seven: at least one object
-must be commandable. Both of these are debris. Nobody can move either one.
+The gate refused it, and it lists the reasons. The first one is Flight Rule
+seven, which requires that at least one of the two objects can be commanded.
+Both of these are debris, so neither can be moved.
 
-That rule is non-negotiable. There is no waiver path in the engine — not a
-permission we withheld, an absence of code.
+That rule is marked non-negotiable. There is no waiver path for it in the
+engine, so even a unanimous vote cannot approve this.
 
-And these grey rows are not failures. They are unresolved: rules we could not
-evaluate. Most systems read missing data as no problem found. We treat it as
-blocking, because we don't know is a different answer from it's fine.
+The rows in grey are different. Those are rules the system could not evaluate
+at all, and we report them as unresolved. A lot of systems would treat missing
+data as no problem found. We treat it as blocking, because not knowing is not
+the same as being fine.
 
 ---
 
 **[How tab → corridor draws]**
 
-Long March 5B, November 2022. A twenty-tonne stage that came down uncontrolled
-and closed airspace over Spain and southern France.
+This panel walks through one real event: the Long March 5B core stage that
+re-entered in November 2022 and closed airspace over Spain and southern France.
 
-Every step names a number and its source.
+Each step gives a number and where that number came from.
 
-The corridor is this wide because of the live geomagnetic index. Density
-uncertainty, plus or minus forty-nine percent — measured, not assumed.
+The width of the corridor comes from the live geomagnetic index. The density
+uncertainty is plus or minus forty-nine percent, and that figure is measured
+from our own calibration rather than assumed.
 
-What is underneath comes from DINOv3, a satellite vision model: eighteen
-million cells at three-point-four kilometres. Validated against a population
-raster it never saw. Above sixty north it refuses to classify, because we
-measured that it fails there.
+The ground underneath is classified by DINOv3, a satellite vision model. We ran
+it over eighteen million cells at three-point-four kilometre resolution and
+validated it against a population dataset the model had never seen. Above sixty
+degrees north it stops classifying, because we measured that it becomes
+unreliable there.
 
-Casualty expectancy: twenty times over the legal limit.
+The casualty expectancy for this footprint is about twenty times the legal
+limit.
 
-And this line matters. The regulator's own method flattens population into
-latitude bands — it cannot see which longitude the debris is heading for. Same
-footprint, roughly half the risk. Across eighteen thousand footprints, it
-understates exposure ninety-four percent of the time over dense ground.
+This next step is the one I'd highlight. The standard method used by
+regulators averages population into latitude bands, so it cannot tell which
+longitude the debris is heading for. On the same footprint it reports roughly
+half the risk. We measured this across eighteen thousand footprints, and over
+densely populated ground it understates exposure ninety-four percent of the
+time.
 
 ---
 
 **[Follow descent]**
 
-The same descent, from the vehicle. Altitude, flight path angle, downrange.
+This is the same descent viewed from the vehicle, with altitude, flight path
+angle and downrange distance.
 
-The ground scrolling underneath is the vision model — red is built up, blue is
-water, grey is where it declines to answer.
+The colours on the ground are the vision model's output. Red is built-up land,
+blue is water, and grey is where the model declines to classify.
 
-The corridor and entry parameters are the recorded event. The motion is a
-kinematic replay, and the caption says so.
+The corridor and the entry parameters are from the recorded event. The motion
+along it is a replay, and the caption on screen says so.
 
 ---
 
 **[Storms tab → Gannon]**
 
-May 2024, the Gannon storm. Half of everything in low Earth orbit manoeuvred
-within days.
+This is the Gannon storm from May 2024, when roughly half of all satellites in
+low Earth orbit manoeuvred within a few days.
 
-Radio dead over both poles. Navigation degraded inside the auroral ovals.
-Scintillation at the equator. Our ground stations drop from eight to three.
+The bands show where the effects apply. Radio communications fail over the
+poles, satellite navigation degrades in the auroral regions, and there is
+scintillation around the equator. Our reachable ground stations drop from eight
+to three.
 
-And that reaches into the rulebook. Flight Rule nineteen needs the command
-uplink to survive. The Sun just shortened the window to command a satellite, so
-the deadline to decide moved.
+That feeds back into the rulebook. Flight Rule nineteen requires the command
+uplink to be available long enough to send the manoeuvre, so the deadline to
+make a decision moves earlier.
 
-A constraint is not a checkbox. It is something the physical world can take
-away from you while you are deciding.
+That is the point of the whole system. A constraint is not a fixed checkbox.
+Conditions in the real world can remove your ability to act while you are still
+deciding.
 
 ---
 
 **[Prove it]**
 
-The challenge asked for this to stay theme-independent.
+The challenge asked for the capability to work independently of any particular
+theme.
 
-Same engine, zero changes, running a software release gate — tests, CVEs,
-rollback plans, error budgets. Four states, same precedence.
+This is the same engine with no code changes, running a software release gate
+instead: test results, security vulnerabilities, rollback plans and error
+budgets. Same four states, same precedence.
 
-The rules are data. Orbit is where we needed it first.
+The rules are data. Orbital operations is simply the domain we needed it for
+first.
 
 ---
 
 **[GPU screen → close on the signal]**
 
-That just screened every pair in the catalogue — about half a billion — as a
-compute shader on this laptop's GPU. It is a coarse filter; candidates are
-re-screened with full propagation. The verdict never comes from it.
+Finally, this screened every pair in the catalogue, around half a billion of
+them, using a compute shader on this laptop's graphics card. It is a coarse
+filter, and every candidate it produces is re-screened with full orbital
+propagation before anything acts on it.
 
-Four states. Complete, partial, blocked, unresolved.
+So: four states, complete, partial, blocked and unresolved.
 
-The repository carries the proof: a model checker over a hundred and forty-eight
-thousand states, property tests across thousands of generated rulebooks, and
-coverage theorems for the bounds.
+The repository has the supporting work — a model checker that explored a
+hundred and forty-eight thousand states, property tests over generated
+rulebooks, and coverage guarantees for the statistical bounds.
 
-Two of those results are about what we cannot do.
+Two of those results are about the limits of what the system can determine.
