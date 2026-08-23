@@ -2,30 +2,122 @@
   <div class="globe-wrap">
     <div ref="cesiumContainer" class="cesium-container"></div>
 
-    <div class="sat-search">
-      <input
-        class="sat-search-input"
-        v-model="searchQuery"
-        placeholder="Search satellite name or NORAD ID…"
-        @keydown.enter="searchIsNorad && searchByNorad()"
-      />
-      <div v-if="searchQuery && (searchResults.length || searchIsNorad)" class="sat-search-results">
-        <div v-for="r in searchResults" :key="r.id" class="sat-search-row" @click="selectResult(r)">
-          <span class="ssr-name">{{ r.name }}</span>
-          <span class="ssr-meta">NORAD {{ r.norad_id }} · {{ r.operator }}</span>
+    <!-- ===================== TOP-CENTRE STACK =====================
+         The search field and the launch telemetry HUD both used to be
+         absolutely positioned at left:50% with hard-coded top offsets of
+         16px and 58px — so the moment a search returned results they drew
+         straight through each other. They are now siblings in ONE centred
+         flex column, which cannot overlap by construction. -->
+    <div class="hud-top">
+      <!-- Hidden while tracking: the top-left corner is the RETURN control in
+           that mode, and on a narrow globe column a centred 380px search box
+           reaches back far enough to sit on top of it. -->
+      <div v-if="!trackedSat" class="sat-search">
+        <span class="sat-search-icon" aria-hidden="true">
+          <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+            <circle cx="6" cy="6" r="4.4" stroke="currentColor" stroke-width="1.3"/>
+            <path d="M9.4 9.4L13 13" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+          </svg>
+        </span>
+        <input
+          class="sat-search-input"
+          v-model="searchQuery"
+          placeholder="Search satellite name or NORAD ID…"
+          aria-label="Search satellite name or NORAD ID"
+          @keydown.enter="searchIsNorad && searchByNorad()"
+        />
+        <button v-if="searchQuery" class="sat-search-clear" title="Clear" @click="searchQuery = ''">×</button>
+        <div v-if="searchQuery && (searchResults.length || searchIsNorad)" class="sat-search-results">
+          <div v-for="r in searchResults" :key="r.id" class="sat-search-row" @click="selectResult(r)">
+            <span class="ssr-name">{{ r.name }}</span>
+            <span class="ssr-meta">NORAD {{ r.norad_id }} · {{ r.operator }}</span>
+          </div>
+          <div
+            v-if="searchIsNorad && !searchResults.some(r => String(r.norad_id) === searchQuery.trim())"
+            class="sat-search-row fetch"
+            @click="searchByNorad"
+          >
+            {{ searchBusy ? 'fetching…' : `↗ fetch & track NORAD ${searchQuery.trim()}` }}
+          </div>
         </div>
-        <div
-          v-if="searchIsNorad && !searchResults.some(r => String(r.norad_id) === searchQuery.trim())"
-          class="sat-search-row fetch"
-          @click="searchByNorad"
-        >
-          {{ searchBusy ? 'fetching…' : `↗ fetch & track NORAD ${searchQuery.trim()}` }}
+      </div>
+
+      <!-- Launch telemetry HUD -->
+      <div v-if="launchHud.active" class="launch-hud">
+        <div class="lh-phase">{{ launchHud.phase }}</div>
+        <div class="lh-stats">
+          <div><span>SPEED</span><b>{{ launchHud.speed }}<i>km/s</i></b></div>
+          <div><span>ALTITUDE</span><b>{{ launchHud.alt }}<i>km</i></b></div>
+          <div><span>STATUS</span><b class="lh-eta">{{ launchHud.eta }}</b></div>
         </div>
       </div>
     </div>
 
-    <!-- Filter tab + sliding panel (right edge) -->
-    <button class="filter-tab" :class="{ shifted: filterOpen }" @click="filterOpen = !filterOpen">
+    <!-- Filter tab + sliding panel (right edge). A pill, not a 40px circle:
+         the label "FILTERS" is 46px wide and used to spill straight out of
+         the round button it was nominally inside. -->
+
+    <!-- MAP KEY — only while something painted is on screen -->
+    <div v-if="zonesOnScreen || groundActive || globalGround" class="map-key">
+      <div class="mk-title">MAP KEY</div>
+      <template v-if="zonesOnScreen">
+        <div class="mk-sec">STORM EXPOSURE — whole-latitude bands (that is the physics)</div>
+        <div class="mk-row"><i class="mk-swatch" style="background:rgba(255,95,86,.55)"></i> HF blackout — polar caps, radio dead above 63°</div>
+        <div class="mk-row"><i class="mk-swatch" style="background:rgba(76,199,106,.5)"></i> Auroral oval — GNSS degraded</div>
+        <div class="mk-row"><i class="mk-swatch" style="background:rgba(224,163,46,.5)"></i> Scintillation belt — equatorial fading</div>
+        <div class="mk-src">recorded NOAA conditions · boundaries derived from Kp</div>
+      </template>
+      <template v-if="groundActive || globalGround">
+        <div class="mk-sec">{{ globalGround ? "GROUND — DINOv3 vision, whole scanned Earth" : "GROUND UNDER THE CORRIDOR — DINOv3 vision, 3.4 km" }}</div>
+        <div class="mk-row"><i class="mk-swatch" style="background:rgba(235,90,70,.7)"></i> Built-up</div>
+        <div class="mk-row"><i class="mk-swatch" style="background:rgba(64,140,220,.6)"></i> Water</div>
+        <div class="mk-row"><i class="mk-swatch" style="background:rgba(90,170,90,.55)"></i> Sparse</div>
+        <div class="mk-row"><i class="mk-swatch mk-hatch"></i> Model refuses to classify</div>
+        <div class="mk-src">18.2M sub-cells · 90% held-out · validated vs GHS-POP</div>
+      </template>
+    </div>
+    <!-- The descent chase-cam. Appears only while a corridor is on screen. -->
+    <button v-if="hasDescent" class="follow-btn" :class="{ on: following }"
+            @click="following ? stopFollowing() : followDescent()">
+      {{ following ? '✕ STOP FOLLOWING' : '⏵ FOLLOW DESCENT' }}
+    </button>
+    <div v-if="approach" class="approach-hud mono">
+      <template v-if="approach.error">
+        <div class="ah-err">{{ approach.error }}</div>
+      </template>
+      <template v-else>
+        <div class="ah-pair"><b class="a">{{ approach.aName }}</b> × <b class="b">{{ approach.bName }}</b></div>
+        <div class="ah-range" :class="{ close: approach.range_km < 50 }">{{ approach.range_km }} km</div>
+        <div class="ah-sub">{{ approach.done ? 'closest approach: ' + approach.min_range_km + ' km' : (approach.t_to_tca_s > 0 ? 'TCA in ' + approach.t_to_tca_s + ' s (sim)' : 'past TCA') }}</div>
+        <div v-if="approach.verdict" class="ah-verdict" :class="'v-' + approach.verdict.toLowerCase()">
+          GATE: {{ approach.verdict }}
+        </div>
+      </template>
+      <button class="ah-x" @click="stopApproach">✕ EXIT</button>
+    </div>
+    <div v-if="descentHud" class="descent-hud mono">
+      <div class="dh-row"><span>ALT</span><b>{{ descentHud.alt_km }} km</b></div>
+      <div class="dh-row"><span>FLIGHT-PATH ANGLE</span><b>{{ descentHud.fpa_deg }}°</b></div>
+      <div class="dh-row"><span>DOWNRANGE</span><b>{{ descentHud.downrange_km }} / {{ descentHud.span_km }} km</b></div>
+      <div v-if="descentHud.entry" class="dh-row"><span>ENTRY INTERFACE</span><b>{{ descentHud.entry }}</b></div>
+      <div v-if="descentHud.incl" class="dh-row"><span>INCLINATION</span><b>{{ descentHud.incl }}°</b></div>
+      <div v-if="descentHud.bc" class="dh-row"><span>BALLISTIC COEFF</span><b>{{ descentHud.bc }} kg/m²</b></div>
+      <div class="dh-bar"><i :style="{ width: descentHud.pct + '%' }"></i></div>
+      <div class="dh-controls">
+        <button :class="{ on: descentSpeed === 0.25 }" @click="descentSpeed = 0.25">¼×</button>
+        <button :class="{ on: descentSpeed === 0 }" @click="descentSpeed = descentSpeed === 0 ? 1 : 0">{{ descentSpeed === 0 ? '⏵' : '⏸' }}</button>
+        <button :class="{ on: descentSpeed === 1 }" @click="descentSpeed = 1">1×</button>
+        <button :class="{ on: descentSpeed === 4 }" @click="descentSpeed = 4">4×</button>
+      </div>
+      <div class="dh-note">corridor & parameters: recorded event · motion: kinematic replay, not live telemetry</div>
+    </div>
+
+    <button class="filter-tab" :class="{ shifted: filterOpen }" :aria-expanded="filterOpen" @click="filterOpen = !filterOpen">
+      <span class="filter-tab-icon" aria-hidden="true">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+          <path d="M1 2.5h10M3 6h6M5 9.5h2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+        </svg>
+      </span>
       <span class="filter-tab-label">FILTERS</span>
     </button>
     <div class="filter-panel" :class="{ open: filterOpen }">
@@ -42,6 +134,27 @@
         <span class="fp-label">⚠ Dangerous only</span>
         <span class="fp-count">≥70</span>
       </label>
+      <div class="fp-sep"></div>
+      <button class="fp-gpu" :disabled="gpuBusy" @click="runGpuScreen">
+        {{ gpuBusy ? 'SCREENING…' : '⚡ GPU SCREEN — every pair, this machine' }}
+      </button>
+      <div v-if="gpuResult" class="fp-gpu-out mono">
+        <template v-if="gpuResult.error"><span class="bad">{{ gpuResult.error }}</span></template>
+        <template v-else-if="gpuResult.phase">{{ gpuResult.phase }}</template>
+        <template v-else>
+          <div><b>{{ gpuResult.objects.toLocaleString() }}</b> objects · <b>{{ gpuResult.pairs_checked.toLocaleString() }}</b> pairs</div>
+          <div><b>{{ gpuResult.ms }} ms</b> — {{ (gpuResult.pairs_per_sec / 1e9).toFixed(2) }} B pair-checks/s on your GPU</div>
+          <div><b>{{ gpuResult.candidates_found.toLocaleString() }}</b> candidates &lt; {{ gpuResult.threshold_km }} km in the next hour</div>
+          <div class="fp-gpu-note">{{ gpuResult.honesty }}</div>
+        </template>
+      </div>
+      <div class="fp-sep"></div>
+      <label class="fp-row">
+        <input type="checkbox" :checked="globalGround" @change="toggleGlobalGround" />
+        <span class="fp-label">◼ DINOv3 ground layer</span>
+        <span class="fp-count">18.2M cells</span>
+      </label>
+      <div v-if="globalGround" class="fp-hint">What the vision model sees: red built · blue water · green sparse · grey refused. 3.4 km grid, majority-voted for display.</div>
       <div class="fp-sep"></div>
       <label class="fp-row allobj">
         <input type="checkbox" v-model="showAll" />
@@ -85,16 +198,38 @@
       <div v-else class="conj-empty">{{ conjBusy ? 'Loading predictions…' : 'No conjunctions in window.' }}</div>
     </div>
 
-    <!-- Reroute action + result (outside the sliding panel → fixed positioning intact) -->
-    <template v-if="!trackedSat">
-      <div v-if="selectedConj" class="reroute-actions">
-        <button v-if="!planResult" class="reroute-btn2" :disabled="planning" @click="planReroute">
+    <!-- ===================== BOTTOM-CENTRE STACK =====================
+         Three separate floating groups (route detail, reroute actions,
+         launch actions) used to be positioned independently at bottom:150px,
+         bottom:96px and bottom:96px — so two of them landed on exactly the
+         same pixels and the third sat 54px above. One centred column now
+         owns the whole zone and stacks whatever happens to be live. -->
+    <div class="hud-bottom">
+      <!-- Clicked route detail -->
+      <div v-if="selectedRoute" class="route-sel" :style="{ borderColor: selectedRoute.css }">
+        <button class="rs-close" title="Dismiss" @click="clearRouteSelection">×</button>
+        <div class="rs-sat" :style="{ color: selectedRoute.css }">{{ shortName(selectedRoute.sat) }}</div>
+        <div class="rs-type">{{ selectedRoute.type }}</div>
+        <div class="rs-sub">{{ selectedRoute.sub }}</div>
+      </div>
+
+      <div v-if="!trackedSat && selectedConj" class="reroute-actions">
+        <button v-if="!planResult" class="reroute-btn2 primary" :disabled="planning" @click="planReroute">
           {{ planning ? 'PLANNING… screening 33k objects' : '⟳ PLAN OPTIMAL REROUTE' }}
         </button>
         <button class="reroute-btn2 back" @click="clearReroute">↩ BACK TO GLOBE</button>
       </div>
 
-      <div v-if="planResult" class="reroute-card">
+      <!-- Launch on-globe controls -->
+      <div v-if="launchActive" class="reroute-actions">
+        <button class="reroute-btn2 launch" @click="simulateLaunch">▶ SIMULATE LAUNCH</button>
+        <button class="reroute-btn2 back" @click="exitLaunch">↩ EXIT LAUNCH</button>
+      </div>
+    </div>
+
+    <!-- Reroute result card — its own corner, so it never fights the stack -->
+    <template v-if="!trackedSat">
+      <div v-if="planResult" class="reroute-card" :class="{ shifted: filterOpen }">
         <div class="rc-head">
           <span class="rc-title">✓ OPTIMAL REROUTE</span>
           <button class="rc-close" @click="clearReroute">×</button>
@@ -113,41 +248,17 @@
           </div>
         </div>
         <div class="rc-legend">
-          <span style="color:#ef4444">━ {{ shortName(planResult.sat1_name) }}</span>
-          <span style="color:#f59e0b">━ {{ shortName(planResult.sat2_name) }}</span>
-          <span style="color:#cbd5e1">┄ safer (dashed)</span>
+          <span style="color:var(--color-red)">━ {{ shortName(planResult.sat1_name) }}</span>
+          <span style="color:var(--color-amber)">━ {{ shortName(planResult.sat2_name) }}</span>
+          <span style="color:var(--text-secondary)">┄ safer (dashed)</span>
         </div>
       </div>
     </template>
-
-    <!-- Launch telemetry HUD -->
-    <div v-if="launchHud.active" class="launch-hud">
-      <div class="lh-phase">🚀 {{ launchHud.phase }}</div>
-      <div class="lh-stats">
-        <div><span>SPEED</span><b>{{ launchHud.speed }}<i>km/s</i></b></div>
-        <div><span>ALTITUDE</span><b>{{ launchHud.alt }}<i>km</i></b></div>
-        <div><span>STATUS</span><b class="lh-eta">{{ launchHud.eta }}</b></div>
-      </div>
-    </div>
-
-    <!-- Launch on-globe controls -->
-    <div v-if="launchActive" class="reroute-actions">
-      <button class="reroute-btn2 launch" @click="simulateLaunch">▶ SIMULATE LAUNCH</button>
-      <button class="reroute-btn2 back" @click="exitLaunch">↩ EXIT LAUNCH</button>
-    </div>
 
     <!-- Hover tooltip over a route line -->
     <div v-if="routeTip" class="route-tip" :style="{ left: routeTip.x + 14 + 'px', top: routeTip.y + 14 + 'px', borderColor: routeTip.css }">
       <div class="rt-sat" :style="{ color: routeTip.css }">{{ shortName(routeTip.sat) }}</div>
       <div class="rt-type">{{ routeTip.type }}</div>
-    </div>
-
-    <!-- Clicked route detail -->
-    <div v-if="selectedRoute" class="route-sel" :style="{ borderColor: selectedRoute.css }">
-      <button class="rs-close" @click="clearRouteSelection">×</button>
-      <div class="rs-sat" :style="{ color: selectedRoute.css }">{{ shortName(selectedRoute.sat) }}</div>
-      <div class="rs-type">{{ selectedRoute.type }}</div>
-      <div class="rs-sub">{{ selectedRoute.sub }}</div>
     </div>
 
     <div v-if="trackInfo" class="sat-info">
@@ -175,7 +286,27 @@
 // ──────────────────────────────────────────────────────────────────────────
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import * as Cesium from 'cesium'
-import { loadGroupForNorads, loadByNorad, hasRealOrbit, realLatLng, loadCatalogue, loadFullCatalogue, ecefAt, gmstOf, periodMinutes, orbitEciKm, eciKmToEcefMeters } from '../lib/realOrbit.js'
+import { exportStatesEci, loadGroupForNorads, loadByNorad, hasRealOrbit, realLatLng, loadCatalogue, loadFullCatalogue, ecefAt, gmstOf, periodMinutes, orbitEciKm, eciKmToEcefMeters } from '../lib/realOrbit.js'
+
+/**
+ * Resolve a CSS custom property to a concrete colour string.
+ *
+ * Cesium.Color.fromCssColorString cannot parse "var(--color-red)" — it needs a
+ * literal. Rather than duplicate the palette in JavaScript and let the two
+ * drift, we read it back out of the document, so :root in App.vue stays the
+ * single source of truth for every colour in the product.
+ */
+const _cssVarCache = new Map()
+function cssVar(name, fallback = '#ffffff') {
+  if (_cssVarCache.has(name)) return _cssVarCache.get(name)
+  let v = fallback
+  try {
+    const raw = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+    if (raw) v = raw
+  } catch { /* SSR or detached document — fallback stands */ }
+  _cssVarCache.set(name, v)
+  return v
+}
 
 // Same props/emits as the old component so App.vue needs no changes.
 const props = defineProps({
@@ -183,6 +314,8 @@ const props = defineProps({
   conjunctions: { type: Array, default: () => [] },
   plan: { type: Object, default: null },   // active avoidance plan (orbits to draw)
   launchPlan: { type: Object, default: null },  // active launch trajectory to draw + animate
+  spaceWeather: { type: Object, default: null }, // NOAA conditions + derived exposure zones
+  deorbit: { type: Object, default: null },      // active deorbit plan: corridor + footprint
 })
 
 const emit = defineEmits(['satellite-click', 'reroute-planned', 'launch-clear', 'ready'])
@@ -190,6 +323,7 @@ const cesiumContainer = ref(null)
 const trackedSat = ref(null)   // the satellite the camera is currently following
 const trackInfo = ref(null)    // live readout (lat/lon/alt/speed) for the tracked sat
 let viewer = null
+let placeLabelLayer = null    // Ion place-name overlay; off by default
 let clickHandler = null
 let infoTimer = null
 
@@ -236,7 +370,22 @@ onMounted(() => {
   // crisp surface. Sky atmosphere alone gives the nice edge glow.
   scene.skyAtmosphere.show = true
   globe.showGroundAtmosphere = false
-  scene.skyAtmosphere.atmosphereLightIntensity = 12.0   // brighter limb glow
+  // A deeper, cooler limb. The reference look is a dark planet with one bright
+  // rim of scattered light, so push intensity up and pull the hue toward blue
+  // rather than the default cyan-white wash.
+  scene.skyAtmosphere.atmosphereLightIntensity = 20.0
+  scene.skyAtmosphere.hueShift = -0.02
+  scene.skyAtmosphere.saturationShift = 0.18
+  scene.skyAtmosphere.brightnessShift = -0.05
+  // Slightly darken the daylit surface so the limb glow and the city lights
+  // read against it instead of competing with a bright blue disc.
+  globe.nightFadeInDistance = 1.0e7
+  globe.nightFadeOutDistance = 1.0e7
+  // HDR OFF. Cesium's tone-mapper clips each colour channel independently, and
+  // the Black Marble night layer added below sits right at the top of its
+  // range — which turned dense city lights into yellow/cyan/magenta blobs.
+  // With HDR off the night side renders in true colour.
+  if (scene.highDynamicRange !== undefined) scene.highDynamicRange = false
 
   // ── Real-time day / night ───────────────────────────────────────────────
   // Shade the globe by the ACTUAL current sun position — the day/night
@@ -249,17 +398,57 @@ onMounted(() => {
   viewer.clock.clockStep = Cesium.ClockStep.SYSTEM_CLOCK   // tick = wall clock
   viewer.clock.shouldAnimate = true
 
-  // NASA "Earth at Night" (Black Marble, Ion asset 3812) shown ONLY on the
-  // dark side: dayAlpha 0 = invisible in daylight, nightAlpha 1 = full city
-  // lights at night. Google satellite imagery still shows on the lit side.
+  // NASA "Earth at Night" (Black Marble, Ion asset 3812) on the dark side only.
+  //
+  // WHY THE SETTINGS ARE NEUTRAL: this used to run brightness 2.4 / contrast
+  // 1.5. Composited under `scene.highDynamicRange` (disabled just above) the
+  // tone-mapper clipped each colour channel independently, so dense city
+  // regions came out as flat yellow, cyan and magenta blobs floating over an
+  // otherwise invisible night side. Softening those numbers alone did NOT fix
+  // it — the false colour came from the HDR composite. With HDR off the layer
+  // can be left essentially untouched and the lights render as lights.
   const nightLayer = Cesium.ImageryLayer.fromProviderAsync(
     Cesium.IonImageryProvider.fromAssetId(3812)
   )
-  // Set day/night blend directly on the layer (reliable across the async load).
+  // With HDR off there is headroom to lift the lights again — the old 2.4 only
+  // blew out because the tone-mapper was clipping on top of it.
   nightLayer.dayAlpha = 0.0     // FULLY invisible on the daylit side
   nightLayer.nightAlpha = 1.0   // full city lights on the dark side
-  nightLayer.brightness = 2.4   // lights pop without bleeding into day
-  nightLayer.contrast = 1.5     // darker gaps so cities stand out
+  nightLayer.contrast = 1.25    // dark ocean stays dark so the lights separate
+
+  // ── Why brightness is a FUNCTION of zoom ────────────────────────────────
+  // City lights are SPARSE: a few brilliant pixels surrounded by black. When
+  // the camera pulls back, Cesium serves a coarser tile level and each texel
+  // becomes the AVERAGE of a large area — so a city's handful of bright pixels
+  // gets averaged against all the darkness around it and the whole continent
+  // fades out. That is why the lights looked fine up close and dim from orbit:
+  // it is the mip-level average, not the brightness setting.
+  //
+  // So we pay the averaging back: brighten as the camera pulls away, and taper
+  // to neutral once real pixels are on screen.
+  //
+  // DO NOT assign a function here. ImageryLayer's .d.ts still documents
+  // `brightness` as `number | function(frameState, layer, x, y, level)`, but as
+  // of Cesium 1.142 the globe surface shader reads `imageryLayer.brightness`
+  // STRAIGHT into a float uniform (`dayTextureBrightness`) and never calls it.
+  // A function lands in the uniform as NaN and blacks out every tile on the
+  // planet — base imagery included — with no console error to explain it.
+  // Driving a plain number off the camera height does the same job safely.
+  const NIGHT_NEAR = 1.7        // close in, real pixels — leave them alone
+  const NIGHT_FAR = 3.6         // whole-Earth view — undo the mip averaging
+  const H_NEAR = 1.5e6          // ≤1500 km up: detail is real
+  const H_FAR = 1.8e7           // ≥18000 km up: fully averaged
+  let lastNightBrightness = -1
+  scene.preRender.addEventListener(() => {
+    const h = viewer.camera.positionCartographic.height
+    const t = Cesium.Math.clamp((h - H_NEAR) / (H_FAR - H_NEAR), 0.0, 1.0)
+    const b = NIGHT_NEAR + (NIGHT_FAR - NIGHT_NEAR) * t
+    // Only write on a meaningful change — the setter dirties layer state.
+    if (Math.abs(b - lastNightBrightness) > 0.01) {
+      lastNightBrightness = b
+      nightLayer.brightness = b
+    }
+  })
   viewer.imageryLayers.add(nightLayer)
 
   // ── Realistic sun ─────────────────────────────────────────────────────────
@@ -271,10 +460,13 @@ onMounted(() => {
   bloom.enabled = true
   bloom.uniforms.glowOnly = false
   // Only the VERY brightest pixels (the sun) bloom — not surface/city features.
+  // brightness was -0.85, which still let clipped city-light patches through;
+  // -0.95 puts the threshold above anything on the surface, so the only thing
+  // in the scene that glows is the star.
   bloom.uniforms.contrast = 255
-  bloom.uniforms.brightness = -0.85
+  bloom.uniforms.brightness = -0.95
   bloom.uniforms.delta = 1.0
-  bloom.uniforms.sigma = 3.0
+  bloom.uniforms.sigma = 2.0      // tighter halo — was 3.0
   bloom.uniforms.stepSize = 1.0
   addRealisticSun()
 
@@ -290,7 +482,9 @@ onMounted(() => {
   const labels = Cesium.ImageryLayer.fromProviderAsync(
     Cesium.IonImageryProvider.fromAssetId(3830185)
   )
+  labels.show = false          // the planet is the subject, not a road atlas
   viewer.imageryLayers.add(labels)
+  placeLabelLayer = labels
 
   // ── Idle auto-spin ──────────────────────────────────────────────────────
   // Slowly rotate the globe when the user isn't touching it. Pauses for 3 s
@@ -301,9 +495,27 @@ onMounted(() => {
   const markInteract = () => { lastInteract = performance.now() }
   scene.canvas.addEventListener('wheel', markInteract, { passive: true })
   scene.postRender.addEventListener(() => {
+    // integrate playback (runs whether or not the camera follows)
+    if (descentAt) {
+      const nowMs = performance.now()
+      descentProgress = (descentProgress + ((nowMs - descentLastTick) / DESCENT_BASE_MS) * descentSpeed.value) % 1
+      descentLastTick = nowMs
+    }
+    // the conjunction moment owns the camera while it plays
+    if (apPlay && apPlay.camTick) { apPlay.camTick(); return }
+    // chase camera: behind and above the descending stage, every frame
+    if (following.value && descentAt) {
+      const t = descentProgress
+      const pos = descentAt(t)
+      const ahead = descentAt(Math.min(0.999, t + 0.01))
+      const dir = Cesium.Cartesian3.subtract(ahead, pos, new Cesium.Cartesian3())
+      const heading = Math.atan2(dir.y, dir.x)
+      viewer.camera.lookAt(pos, new Cesium.HeadingPitchRange(heading, -0.42, 520000))
+      return   // the chase owns the camera; nothing else may move it this frame
+    }
     // Never spin while following a satellite — checked from the click instant
     // (trackedSat) AND during fly-in, so the spin can't fight the flyTo camera.
-    if (trackedSat.value || viewer.trackedEntity) return
+    if (trackedSat.value || viewer.trackedEntity || following.value || apPlay) return
     if (performance.now() - lastInteract < SPIN_RESUME_MS) return
     if (scene.camera.positionCartographic.height < MIN_SPIN_HEIGHT) return
     scene.camera.rotate(Cesium.Cartesian3.UNIT_Z, SPIN_RATE)
@@ -328,7 +540,22 @@ onMounted(() => {
     const picked = scene.pick(m.endPosition)
     const idp = picked && picked.id
     if (idp && idp._routeMeta) { routeTip.value = { x: m.endPosition.x, y: m.endPosition.y, ...idp._routeMeta }; scene.canvas.style.cursor = 'pointer' }
-    else if (idp && idp._conjMeta) { const c = idp._conjMeta; routeTip.value = { x: m.endPosition.x, y: m.endPosition.y, sat: `${shortName(c.aName)} × ${shortName(c.bName)}`, type: 'CONJUNCTION', sub: `${c.missKm.toFixed(2)} km`, css: '#a855f7' }; scene.canvas.style.cursor = 'pointer' }
+    else if (idp && idp._conjMeta) { const c = idp._conjMeta; routeTip.value = { x: m.endPosition.x, y: m.endPosition.y, sat: `${shortName(c.aName)} × ${shortName(c.bName)}`, type: 'CONJUNCTION', sub: `${c.missKm.toFixed(2)} km`, css: cssVar('--color-purple') }; scene.canvas.style.cursor = 'pointer' }
+    else if (idp && idp.name) {
+      // Generic fallback: anything painted with a name — storm bands, ground
+      // stations, the corridor, the impact scatter — explains itself on hover.
+      // Painted regions with no hover read as decoration, and decoration is
+      // exactly what they are not.
+      const desc = typeof idp.description?.getValue === 'function'
+        ? idp.description.getValue(viewer.clock.currentTime) : (idp.description || '')
+      routeTip.value = {
+        x: m.endPosition.x, y: m.endPosition.y,
+        sat: idp.name, type: 'LAYER',
+        sub: String(desc).replace(/<[^>]*>/g, '').slice(0, 120),
+        css: cssVar('--text-secondary'),
+      }
+      scene.canvas.style.cursor = 'help'
+    }
     else { routeTip.value = null; scene.canvas.style.cursor = '' }
   }, Cesium.ScreenSpaceEventType.MOUSE_MOVE)
 
@@ -348,6 +575,24 @@ onMounted(() => {
 
   // Per frame: damp the camera target toward the real satellite (filters jitter).
   scene.postRender.addEventListener(() => {
+    // integrate playback (runs whether or not the camera follows)
+    if (descentAt) {
+      const nowMs = performance.now()
+      descentProgress = (descentProgress + ((nowMs - descentLastTick) / DESCENT_BASE_MS) * descentSpeed.value) % 1
+      descentLastTick = nowMs
+    }
+    // the conjunction moment owns the camera while it plays
+    if (apPlay && apPlay.camTick) { apPlay.camTick(); return }
+    // chase camera: behind and above the descending stage, every frame
+    if (following.value && descentAt) {
+      const t = descentProgress
+      const pos = descentAt(t)
+      const ahead = descentAt(Math.min(0.999, t + 0.01))
+      const dir = Cesium.Cartesian3.subtract(ahead, pos, new Cesium.Cartesian3())
+      const heading = Math.atan2(dir.y, dir.x)
+      viewer.camera.lookAt(pos, new Cesium.HeadingPitchRange(heading, -0.42, 520000))
+      return   // the chase owns the camera; nothing else may move it this frame
+    }
     if (!trackedReal || !smoothPos) return
     // Read the tracked object's position via ecefAt (same proven path that
     // moves the cloud) so the follow can't freeze on cloud/catalogue objects.
@@ -612,8 +857,8 @@ function buildSampledOrbit(norad) {
 
 // Map a 0-100 risk score to a colour (green → amber → red).
 function riskColor(score) {
-  if (score >= 70) return Cesium.Color.fromCssColorString('#ff3b3b')   // high
-  if (score >= 40) return Cesium.Color.fromCssColorString('#ffb302')   // medium
+  if (score >= 70) return Cesium.Color.fromCssColorString(cssVar('--color-red'))   // high
+  if (score >= 40) return Cesium.Color.fromCssColorString(cssVar('--color-amber'))   // medium
   return Cesium.Color.fromCssColorString('#39d98a')                     // low
 }
 
@@ -780,11 +1025,11 @@ function riskClass(score) {
 // ── Group filters ─────────────────────────────────────────────────────────
 const filterOpen = ref(false)
 const GROUPS = [
-  { key: 'stations', label: 'Space Stations', color: '#4a9eff' },
+  { key: 'stations', label: 'Space Stations', color: cssVar('--accent-blue') },
   { key: 'starlink', label: 'Starlink',       color: '#39d98a' },
   { key: 'oneweb',   label: 'OneWeb',          color: '#a78bfa' },
-  { key: 'debris',   label: 'Debris / R/B',    color: '#ff6b6b' },
-  { key: 'other',    label: 'Other Payloads',  color: '#ffc94d' },
+  { key: 'debris',   label: 'Debris / R/B',    color: cssVar('--color-red') },
+  { key: 'other',    label: 'Other Payloads',  color: cssVar('--color-amber') },
 ]
 const enabled = reactive({ stations: true, starlink: true, oneweb: true, debris: true, other: true })
 const dangerousOnly = ref(false)
@@ -840,7 +1085,7 @@ async function ensureCatalogue() {
   if (!list.length) list = await loadCatalogue(CATALOGUE_GROUPS)
   const seedNorads = new Set(props.satellites.map(s => s.norad_id))
   cataloguePoints = viewer.scene.primitives.add(new Cesium.PointPrimitiveCollection())
-  const active = Cesium.Color.fromCssColorString('#9fd4ff').withAlpha(0.9)
+  const active = Cesium.Color.fromCssColorString(cssVar('--text-secondary')).withAlpha(0.9)
   const debris = Cesium.Color.fromCssColorString('#ff8a5c').withAlpha(0.9)
   for (const o of list) {
     if (seedNorads.has(o.norad)) continue          // already a curated entity
@@ -994,7 +1239,7 @@ async function runConjunctionScan() {
 }
 
 function conjColor(missKm) {
-  return missKm < 1 ? '#ff3b3b' : missKm < 5 ? '#ffb302' : '#9fd4ff'
+  return missKm < 1 ? cssVar('--color-red') : missKm < 5 ? cssVar('--color-amber') : cssVar('--text-secondary')
 }
 function clearConjunctions() {
   for (const e of conjEntities) viewer.entities.remove(e)
@@ -1079,7 +1324,7 @@ function drawPlan(plan) {
   // Each satellite gets its own colour for its CURRENT path; rerouted = same hue
   // but DASHED + brighter, so the safer path shows even where it overlaps the
   // current orbit (the nudge is tiny, so they coincide except near the conjunction).
-  const C1 = '#ef4444', C1R = '#fca5a5', C2 = '#f59e0b', C2R = '#fcd34d'
+  const C1 = cssVar('--color-red'), C1R = cssVar('--color-red'), C2 = cssVar('--color-amber'), C2R = '#fcd34d'
   const n1 = shortName(plan.sat1_name), n2 = shortName(plan.sat2_name)
   const s1c = toCarts(plan.sat1_current), s2c = toCarts(plan.sat2_current)
   const s1r = toCarts(plan.sat1_rerouted), s2r = toCarts(plan.sat2_rerouted)
@@ -1106,6 +1351,807 @@ function drawPlan(plan) {
 }
 watch(() => props.plan, (p) => { if (viewer) (p ? drawPlan(p) : clearPlan()) })
 
+// ---------------------------------------------------------------------------
+// SPACE-WEATHER EXPOSURE ZONES
+//
+// Three bands, derived from the live NOAA feed. These are EXPOSURE ZONES, not
+// outage predictions: they show where a documented class of effect applies, and
+// each carries its basis. We do not claim a specific station, grid or aircraft
+// will fail.
+//
+// The polar band is the one that matters operationally — it is what takes the
+// polar ground stations offline and violates FR-19.
+// ---------------------------------------------------------------------------
+const swEntities = []
+
+function clearSpaceWeather() {
+  for (const e of swEntities) viewer.entities.remove(e)
+  swEntities.length = 0
+}
+
+/**
+ * A zone BOUNDARY, drawn as a thin line at the latitude — not a filled dome.
+ *
+ * The first version painted translucent rectangles across whole latitude bands.
+ * On a lit globe that reads as coloured haze smeared over the Earth: it hides
+ * the planet, which is the thing worth looking at, and it says nothing precise.
+ * A boundary line says exactly what a zone boundary is, and the Earth stays
+ * visible through it.
+ */
+/**
+ * A filled latitude band. The boundary polylines alone were technically
+ * present and effectively invisible — 1px lines over the night side of the
+ * planet during the one demo where visibility mattered most. A translucent
+ * band reads at any zoom and any lighting; the boundary line stays as its
+ * hard edge.
+ */
+function addBand(latLo, latHi, colour, name, description, focus = 'hi') {
+  // A single flat rectangle read as beach-ball paint. Real exposure is not
+  // uniform: proton flux concentrates at the pole, auroral effects at the
+  // oval's edge, scintillation at the magnetic equator. Six strips with alpha
+  // falling away from the physical maximum give the band a shape that matches
+  // the phenomenon instead of a printing error.
+  const STRIPS = 6
+  for (const sign of latLo < 0 ? [1] : [1, -1]) {
+    const lo = sign > 0 ? latLo : -latHi
+    const hi = sign > 0 ? latHi : -latLo
+    for (let k = 0; k < STRIPS; k++) {
+      // Overlap adjacent strips by a sliver: rectangles that merely abut leave
+      // visible seam rings where floating point disagrees about the shared edge.
+      const step = (hi - lo) / STRIPS
+      const a = lo + step * k
+      const b = Math.min(hi, a + step + step * 0.2)
+      // where is this strip relative to the band's physical maximum?
+      let w = (k + 0.5) / STRIPS                       // 0 at lo edge, 1 at hi
+      if (sign < 0) w = 1 - w
+      let strength
+      if (focus === 'hi') strength = w
+      else if (focus === 'lo') strength = 1 - w
+      else strength = 1 - Math.abs(2 * ((k + 0.5) / STRIPS) - 1)   // mid
+      swEntities.push(viewer.entities.add({
+        name,
+        description,
+        rectangle: {
+          coordinates: Cesium.Rectangle.fromDegrees(-180, a, 180, b),
+          material: colour.withAlpha(0.05 + 0.30 * strength),
+          outline: false,
+        },
+      }))
+    }
+    swEntities.push(viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(0, (lo + hi) / 2, 250000),
+      label: {
+        text: name,
+        font: '600 12px "JetBrains Mono", monospace',
+        fillColor: Cesium.Color.WHITE,
+        showBackground: true,
+        backgroundColor: Cesium.Color.BLACK.withAlpha(0.65),
+        backgroundPadding: new Cesium.Cartesian2(8, 5),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        scaleByDistance: new Cesium.NearFarScalar(8e6, 1.0, 8e7, 0.55),
+      },
+    }))
+  }
+}
+
+function addBoundary(latDeg, colour, name, description, dashed) {
+  for (const sign of [1, -1]) {
+    const lat = sign * latDeg;
+    const pts = [];
+    for (let lon = -180; lon <= 180; lon += 2) pts.push(lon, lat);
+    swEntities.push(viewer.entities.add({
+      name,
+      description,
+      polyline: {
+        positions: Cesium.Cartesian3.fromDegreesArray(pts),
+        width: 1.6,
+        clampToGround: false,
+        material: dashed
+          ? new Cesium.PolylineDashMaterialProperty({ color: colour, dashLength: 14 })
+          : colour,
+        arcType: Cesium.ArcType.RHUMB,
+      },
+    }));
+  }
+}
+
+/**
+ * Space-weather zones are OFF by default.
+ *
+ * They were drawn automatically whenever a zone was "active", which meant the
+ * globe got covered in rings the moment geomagnetic activity rose — including
+ * during a replay. The planet is the thing worth looking at. These are an
+ * optional overlay the operator asks for, not decoration we impose.
+ */
+function drawSpaceWeather(sw) {
+  if (!viewer) return
+  clearSpaceWeather()
+  if (!sw || !sw.zones || !sw.show_zones) return
+  const z = sw.zones
+
+  // Polar cap absorption — the boundary above which HF is blacked out. This is
+  // the one that actually takes ground stations offline, so it is solid.
+  if (z.polar_cap_absorption && z.polar_cap_absorption.active) {
+    addBand(z.polar_cap_absorption.magnetic_latitude_deg, 90,
+      Cesium.Color.fromCssColorString(cssVar('--color-red')),
+      `HF BLACKOUT — polar cap (${z.polar_cap_absorption.level})`,
+      z.polar_cap_absorption.effect, 'hi')
+    addBoundary(z.polar_cap_absorption.magnetic_latitude_deg,
+      Cesium.Color.fromCssColorString(cssVar('--color-red')).withAlpha(0.9),
+      `Polar cap absorption — ${z.polar_cap_absorption.level}`,
+      `${z.polar_cap_absorption.effect} · typical duration ${z.polar_cap_absorption.typical_duration}`,
+      false)
+  }
+
+  // Auroral oval — advisory, so dashed.
+  if (z.auroral_oval && z.auroral_oval.active) {
+    addBand(z.auroral_oval.equatorward_boundary_deg,
+      (z.polar_cap_absorption && z.polar_cap_absorption.active)
+        ? z.polar_cap_absorption.magnetic_latitude_deg : 90,
+      Cesium.Color.fromCssColorString('#4cc76a'),
+      'AURORAL OVAL — GNSS degraded',
+      z.auroral_oval.effect, 'lo')
+    addBoundary(z.auroral_oval.equatorward_boundary_deg,
+      Cesium.Color.fromCssColorString('#4cc76a').withAlpha(0.75),
+      'Auroral oval — equatorward boundary',
+      z.auroral_oval.effect, true)
+  }
+
+  // Equatorial scintillation belt — advisory, dashed.
+  if (z.equatorial_scintillation && z.equatorial_scintillation.active) {
+    addBand(-z.equatorial_scintillation.band_deg, z.equatorial_scintillation.band_deg,
+      Cesium.Color.fromCssColorString('#e0a32e'),
+      'SCINTILLATION BELT',
+      z.equatorial_scintillation.effect, 'mid')
+    addBoundary(z.equatorial_scintillation.band_deg,
+      Cesium.Color.fromCssColorString('#e0a32e').withAlpha(0.6),
+      'Equatorial scintillation belt',
+      z.equatorial_scintillation.effect, true)
+  }
+
+  // Ground stations. Only drawn when something is actually degraded — a row of
+  // green dots in nominal conditions is noise, not information.
+  const degraded = sw.ground_segment && sw.ground_segment.stations_available < sw.ground_segment.stations_assigned
+  if (!degraded) return
+
+  for (const st of sw.ground_segment.stations) {
+    swEntities.push(viewer.entities.add({
+      name: st.name,
+      description: st.available ? 'Reachable' : `UNREACHABLE — ${st.reason}`,
+      position: Cesium.Cartesian3.fromDegrees(st.lon, st.lat, 0),
+      point: {
+        pixelSize: st.available ? 6 : 10,
+        color: st.available
+          ? Cesium.Color.fromCssColorString('#8b93a1')
+          : Cesium.Color.fromCssColorString(cssVar('--color-red')),
+        outlineColor: Cesium.Color.BLACK, outlineWidth: 1.5,
+      },
+      label: st.available ? undefined : {
+        text: `${st.id} ✕`,
+        font: '600 11px "JetBrains Mono", monospace',
+        fillColor: Cesium.Color.fromCssColorString(cssVar('--color-red')),
+        pixelOffset: new Cesium.Cartesian2(0, -17),
+        showBackground: true,
+        backgroundColor: Cesium.Color.BLACK.withAlpha(0.72),
+        scaleByDistance: new Cesium.NearFarScalar(6e6, 1.0, 4e7, 0.0),
+      },
+    }))
+  }
+}
+
+// The feed refreshes every few seconds. Tearing down and repainting the bands
+// on every poll made them flicker even when nothing had changed — so redraw
+// only when something the drawing depends on is actually different.
+let swSignature = ''
+function swSig(sw) {
+  if (!sw || !sw.zones) return 'off'
+  const z = sw.zones, g = sw.ground_segment || {}
+  return [
+    sw.show_zones ? 1 : 0,
+    z.polar_cap_absorption && z.polar_cap_absorption.active ? z.polar_cap_absorption.magnetic_latitude_deg : '-',
+    z.auroral_oval && z.auroral_oval.active ? z.auroral_oval.equatorward_boundary_deg : '-',
+    z.equatorial_scintillation && z.equatorial_scintillation.active ? z.equatorial_scintillation.band_deg : '-',
+    g.stations_available, g.stations_assigned,
+  ].join('|')
+}
+watch(() => props.spaceWeather, (sw) => {
+  if (!viewer) return
+  const sig = swSig(sw)
+  if (sig === swSignature) return
+  swSignature = sig
+  drawSpaceWeather(sw)
+}, { deep: true })
+
+// ---------------------------------------------------------------------------
+// RE-ENTRY CORRIDOR — the return leg
+//
+// The footprint is a DISTRIBUTION, not a line, because re-entry uncertainty is
+// dominated by atmospheric drag. Drawing it as a line would be a lie about the
+// physics, so the Monte Carlo samples are drawn as a scatter and the corridor
+// as its spine.
+// ---------------------------------------------------------------------------
+const deorbitEntities = []
+let groundLayer = null      // the DINOv3 land-cover overlay under a corridor
+const groundActive = ref(false)
+const globalGround = ref(false)      // the whole-planet DINOv3 layer
+const gpuResult = ref(null)          // last WebGPU screening result
+const gpuBusy = ref(false)
+
+/**
+ * Screen every pair in the loaded catalogue on THIS machine's GPU.
+ *
+ * The point is not decoration: this is the O(N^2) coarse filter every real
+ * screening pipeline runs, executed as a compute shader in the browser, with
+ * the throughput measured live rather than claimed. Candidates go back to the
+ * gateway for full SGP4 refinement — the verdict never comes from this pass,
+ * and the result panel says so.
+ */
+async function runGpuScreen() {
+  if (gpuBusy.value) return
+  gpuBusy.value = true
+  gpuResult.value = { phase: 'propagating the catalogue…' }
+  try {
+    // catalogue must be loaded; nudge the full set in if it is not
+    await loadFullCatalogue().catch(() => {})
+    const snap = exportStatesEci(new Date())
+    if (snap.ids.length < 100) {
+      gpuResult.value = { error: 'catalogue not loaded yet — toggle "Show all tracked objects" first' }
+      return
+    }
+    gpuResult.value = { phase: `screening ${snap.ids.length.toLocaleString()} objects…` }
+    const { gpuScreen } = await import('../lib/gpuScreen.js')
+    const r = await gpuScreen(snap)
+    if (!r.supported) { gpuResult.value = { error: r.reason }; return }
+    gpuResult.value = r
+    // paint the ten closest candidate pairs for a few seconds
+    const tmp = []
+    const now = new Date()
+    for (const c of r.candidates.slice(0, 10)) {
+      const pa = ecefAt(c.a, now), pb = ecefAt(c.b, now)
+      if (!pa || !pb) continue
+      tmp.push(viewer.entities.add({
+        polyline: {
+          positions: [new Cesium.Cartesian3(pa.x, pa.y, pa.z), new Cesium.Cartesian3(pb.x, pb.y, pb.z)],
+          width: 1.5,
+          material: Cesium.Color.WHITE.withAlpha(0.5),
+        },
+      }))
+    }
+    setTimeout(() => { for (const e of tmp) viewer.entities.remove(e) }, 12000)
+  } catch (e) {
+    gpuResult.value = { error: String(e.message || e) }
+  } finally {
+    gpuBusy.value = false
+  }
+}
+let globalGroundLayer = null
+
+/**
+ * The whole planet as the vision model classified it — every cell it scanned,
+ * majority-voted down to 4x4 per cell. Drawn once to a canvas, kept as a
+ * single imagery layer, toggled from the FILTERS panel.
+ */
+/** Turn the global layer ON if it is not already — used by the story tab. */
+async function showGlobalGround() {
+  if (!globalGroundLayer) await toggleGlobalGround()
+}
+
+async function toggleGlobalGround() {
+  if (globalGroundLayer) {
+    viewer.imageryLayers.remove(globalGroundLayer, true)
+    globalGroundLayer = null
+    globalGround.value = false
+    return
+  }
+  let data
+  try {
+    const res = await fetch('/api/ground/global')
+    if (!res.ok) return
+    data = await res.json()
+  } catch { return }
+  const D = data.grid, NX = data.nx
+  const canvas = document.createElement('canvas')
+  canvas.width = NX * D
+  canvas.height = 360 * D
+  const c2 = canvas.getContext('2d')
+  const COLOUR = {
+    WATER: 'rgba(30, 95, 185, 0.85)',
+    SPARSE: 'rgba(52, 130, 52, 0.8)',
+    BUILT: 'rgba(205, 48, 34, 0.9)',
+    UNKNOWN: 'rgba(135, 135, 145, 0.85)',
+  }
+  for (const [key, g] of data.cells) {
+    const iy = Math.floor(key / NX), ix = key % NX
+    for (let i = 0; i < g.length; i++) {
+      c2.fillStyle = COLOUR[data.classes[g[i]]] || COLOUR.UNKNOWN
+      c2.fillRect(ix * D + (i % D), iy * D + Math.floor(i / D), 1, 1)
+    }
+  }
+  globalGroundLayer = viewer.imageryLayers.addImageryProvider(
+    new Cesium.SingleTileImageryProvider({
+      url: canvas.toDataURL(),
+      rectangle: Cesium.Rectangle.fromDegrees(-180, -90, 180, 90),
+      tileWidth: canvas.width,
+      tileHeight: canvas.height,
+    }),
+  )
+  globalGroundLayer.alpha = 0.72
+  globalGround.value = true
+}
+const zonesOnScreen = computed(() => {
+  const sw = props.spaceWeather
+  if (!sw || !sw.show_zones || !sw.zones) return false
+  const z = sw.zones
+  return ['polar_cap_absorption', 'auroral_oval', 'equatorial_scintillation']
+    .some((k) => z[k] && z[k].active)
+})
+
+function clearGroundLayer() {
+  if (groundLayer && viewer) viewer.imageryLayers.remove(groundLayer, true)
+  groundLayer = null
+  groundActive.value = false
+}
+
+/**
+ * Paint what the vision model sees under the corridor.
+ *
+ * 18.2 million sub-cells were classified on an A100 and then shown to nobody.
+ * This fetches the 3.4 km grid for the corridor's bounding box, renders it to
+ * a canvas — one pixel per sub-cell — and drapes it as an imagery layer:
+ *
+ *   blue   water          green  sparse ground
+ *   red    built-up       grey hatch  the model REFUSING to classify
+ *
+ * The refusals are drawn, not hidden: an UNKNOWN cell is the model saying
+ * "I have not seen ground like this", and that admission is the point.
+ */
+async function drawGroundUnder(fp) {
+  clearGroundLayer()
+  if (!fp || !Array.isArray(fp.centreline) || !fp.centreline.length) return
+  const lats = fp.centreline.map((p) => p.lat)
+  const lons = fp.centreline.map((p) => p.lon)
+  const pad = 2.5
+  const w = Math.max(-180, Math.min(...lons) - pad)
+  const e = Math.min(180, Math.max(...lons) + pad)
+  const s = Math.max(-89, Math.min(...lats) - pad)
+  const n = Math.min(89, Math.max(...lats) + pad)
+
+  let data
+  try {
+    const res = await fetch(`/api/ground/dense?w=${w}&s=${s}&e=${e}&n=${n}`)
+    if (!res.ok) return
+    data = await res.json()
+  } catch { return }
+  if (!data.cells || !data.cells.length) return
+
+  const G = data.grid, RES = data.res_deg
+  const x0 = Math.floor((w + 180) / RES), y0 = Math.floor((90 - n) / RES)
+  const cols = Math.floor((e + 180) / RES) - x0 + 1
+  const rows = Math.floor((90 - s) / RES) - y0 + 1
+  const canvas = document.createElement('canvas')
+  canvas.width = cols * G
+  canvas.height = rows * G
+  const ctx2 = canvas.getContext('2d')
+  const COLOUR = {
+    WATER: 'rgba(38, 110, 200, 0.78)',
+    SPARSE: 'rgba(60, 145, 60, 0.72)',
+    BUILT: 'rgba(215, 55, 40, 0.85)',
+    UNKNOWN: 'rgba(140, 140, 150, 0.8)',
+  }
+  // ONLY the ground the corridor can actually reach. Painting the whole
+  // bounding box of an 11,000 km corridor flooded half a continent in red and
+  // buried the corridor graphics themselves — the strip is the subject, the
+  // box was noise.
+  const RESC = data.res_deg
+  const near = (ix, iy) => {
+    const clat = 90 - (iy + 0.5) * RESC
+    const clon = (ix + 0.5) * RESC - 180
+    for (const pt of fp.centreline) {
+      const dLat = clat - pt.lat
+      let dLon = clon - pt.lon
+      if (dLon > 180) dLon -= 360; else if (dLon < -180) dLon += 360
+      // ~2 degrees ≈ the ±2σ corridor plus one cell of margin
+      if (dLat * dLat + dLon * dLon * Math.cos(clat * Math.PI / 180) ** 2 < 4) return true
+    }
+    return false
+  }
+
+  for (const c of data.cells) {
+    if (!near(c.ix, c.iy)) continue
+    const bx = (c.ix - x0) * G, by = (c.iy - y0) * G
+    for (let i = 0; i < c.g.length; i++) {
+      const cls = data.classes[c.g[i]]
+      ctx2.fillStyle = COLOUR[cls] || COLOUR.UNKNOWN
+      const px = bx + (i % G), py = by + Math.floor(i / G)
+      ctx2.fillRect(px, py, 1, 1)
+      // hatch the refusals so they read as "declined", not as a colour
+      if (cls === 'UNKNOWN' && (px + py) % 2) ctx2.clearRect(px, py, 1, 1)
+    }
+  }
+
+  groundLayer = viewer.imageryLayers.addImageryProvider(
+    new Cesium.SingleTileImageryProvider({
+      url: canvas.toDataURL(),
+      rectangle: Cesium.Rectangle.fromDegrees(x0 * RES - 180, 90 - (y0 + rows) * RES, (x0 + cols) * RES - 180, 90 - y0 * RES),
+      tileWidth: canvas.width,
+      tileHeight: canvas.height,
+    }),
+  )
+  groundLayer.alpha = 1.0
+  groundActive.value = true
+}
+
+function clearDeorbit() {
+  for (const e of deorbitEntities) viewer.entities.remove(e)
+  deorbitEntities.length = 0
+  descentEntity = null
+  descentAt = null
+  hasDescent.value = false
+  if (following.value) stopFollowing()
+  clearGroundLayer()
+}
+
+/**
+ * The descending stage, animated down the corridor.
+ *
+ * Everything else on this globe is a static conclusion. This is the event the
+ * conclusions are about: a marker enters at the interface, loses altitude down
+ * the whole track, and goes out at the far end — then again, on a loop. A
+ * short glowing trail sells the motion; the loop period is long enough to read
+ * and short enough that nobody waits for it.
+ */
+// ---------------------------------------------------------------------------
+// THE CONJUNCTION MOMENT — the close approach, replayed as an event.
+//
+// Screening reduces a near-miss to one number in a list. This plays the number
+// back as what it is: two objects, propagated with the same SGP4 used for
+// screening, converging over four minutes of simulated time to their real
+// closest approach — range ticking down live, and the gate's verdict landing
+// at TCA. Time is compressed ~15x; the trajectories are not.
+// ---------------------------------------------------------------------------
+const approach = ref(null)         // { aName, bName, range_km, t_to_tca_s, verdict, done }
+let apPlay = null                  // { conj, t0, span, entities: [] }
+
+function playApproach(conj) {
+  stopApproach()
+  if (!conj || !conj.tca_ms) return
+  const a = conj.sat1_id, b = conj.sat2_id
+  if (!hasRealOrbit(a) || !hasRealOrbit(b)) {
+    approach.value = { error: 'orbit data for one of the objects is not loaded' }
+    return
+  }
+  const WALL_MS = 24000                     // one pass of wall-clock time
+  const SIM_BEFORE = 240e3, SIM_AFTER = 90e3
+  apPlay = { conj, t0: performance.now(), wall: WALL_MS, before: SIM_BEFORE, span: SIM_BEFORE + SIM_AFTER, entities: [] }
+
+  const posAt = (norad, simMs) => {
+    const e = ecefAt(norad, new Date(simMs))
+    return e ? new Cesium.Cartesian3(e.x, e.y, e.z) : null
+  }
+  const simNow = () => {
+    const f = Math.min(1, (performance.now() - apPlay.t0) / WALL_MS)
+    return conj.tca_ms - SIM_BEFORE + f * apPlay.span
+  }
+
+  const mk = (norad, name, colour) => viewer.entities.add({
+    name,
+    position: new Cesium.CallbackProperty(() => posAt(norad, simNow()), false),
+    point: { pixelSize: 12, color: Cesium.Color.fromCssColorString(colour),
+      outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
+      disableDepthTestDistance: Number.POSITIVE_INFINITY },
+    label: { text: shortName(name), font: '600 12px "JetBrains Mono", monospace',
+      fillColor: Cesium.Color.fromCssColorString(colour),
+      pixelOffset: new Cesium.Cartesian2(0, -20), showBackground: true,
+      backgroundColor: Cesium.Color.BLACK.withAlpha(0.7),
+      disableDepthTestDistance: Number.POSITIVE_INFINITY },
+  })
+  apPlay.entities.push(mk(a, conj.sat1_name, '#ff5f56'))
+  apPlay.entities.push(mk(b, conj.sat2_name, '#ffb347'))
+  // the shrinking range line between them
+  apPlay.entities.push(viewer.entities.add({
+    polyline: {
+      positions: new Cesium.CallbackProperty(() => {
+        const t = simNow()
+        const pa = posAt(a, t), pb = posAt(b, t)
+        return pa && pb ? [pa, pb] : []
+      }, false),
+      width: 2,
+      material: new Cesium.PolylineDashMaterialProperty({
+        color: Cesium.Color.WHITE.withAlpha(0.85), dashLength: 10 }),
+    },
+  }))
+
+  // camera: hold on the midpoint, range scaled to the geometry
+  apPlay.camTick = () => {
+    const t = simNow()
+    const pa = posAt(a, t), pb = posAt(b, t)
+    if (!pa || !pb) return
+    const mid = Cesium.Cartesian3.midpoint(pa, pb, new Cesium.Cartesian3())
+    const sep = Cesium.Cartesian3.distance(pa, pb)
+    // The raw range shrinks by orders of magnitude in seconds, and feeding it
+    // straight to the camera made the zoom lurch. Exponentially smooth it, and
+    // let the heading drift slowly instead of sitting welded to one bearing.
+    const target = Math.max(sep * 3.0, 90000)
+    apPlay.smooth = apPlay.smooth ? apPlay.smooth + (target - apPlay.smooth) * 0.045 : target
+    const heading = 0.5 + ((performance.now() - apPlay.t0) / 1000) * 0.02
+    viewer.camera.lookAt(mid, new Cesium.HeadingPitchRange(heading, -0.4, apPlay.smooth))
+    const range = sep / 1000
+    const toTca = (conj.tca_ms - t) / 1000
+    const done = (performance.now() - apPlay.t0) >= WALL_MS
+    approach.value = {
+      aName: shortName(conj.sat1_name), bName: shortName(conj.sat2_name),
+      range_km: range < 100 ? range.toFixed(2) : Math.round(range).toLocaleString(),
+      t_to_tca_s: Math.round(toTca),
+      min_range_km: conj.min_range_km,
+      verdict: done && conj.constraint ? conj.constraint.signal : null,
+      pc: conj.probability,
+      done,
+    }
+  }
+}
+
+function stopApproach() {
+  if (!apPlay) { approach.value = null; return }
+  for (const e of apPlay.entities) viewer.entities.remove(e)
+  apPlay = null
+  approach.value = null
+  viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY)
+  viewer.camera.flyHome(1.2)
+}
+
+let descentStart = 0
+let descentEntity = null
+let descentFp = null
+let descentAt = null   // frac -> Cartesian3, kept for the chase camera
+let descentMeta = null // the replay's real parameters, for the HUD
+// Playback is integrated, not wall-clocked, so it can be slowed, paused and
+// fast-forwarded without the marker jumping.
+const DESCENT_BASE_MS = 48000          // one pass at 1x — slow enough to watch
+const descentSpeed = ref(1)            // 0 = paused, 0.5, 1, 4
+let descentProgress = 0
+let descentLastTick = 0
+const following = ref(false)
+const hasDescent = ref(false)   // reactive gate for the follow button — a bare
+                                // `let` entity ref is invisible to the template
+const descentHud = ref(null)   // { alt_km, downrange_km, span_km, pct }
+let hudTimer = null
+
+/**
+ * Ride down with the stage.
+ *
+ * A marker crossing a globe seen from 20,000 km is a screensaver. Tracking it
+ * turns the same data into an event: the camera falls with the stage, the
+ * ground rises, and the HUD counts the altitude down. Cesium's trackedEntity
+ * does the camera work; we just keep a live readout beside it.
+ */
+function followDescent() {
+  if (!viewer || !descentAt) return
+  following.value = true
+  // Drive the camera by hand every frame. trackedEntity has its own ideas
+  // about framing and gave an unreliable follow; lookAt from a fixed chase
+  // offset is boring and therefore correct.
+  viewer.trackedEntity = undefined
+  if (hudTimer) clearInterval(hudTimer)
+  hudTimer = setInterval(() => {
+    if (!descentFp || !following.value) return
+    const t = descentProgress
+    const span = descentFp.span_km || 1
+    // Flight-path angle from the trajectory's own geometry: the angle between
+    // where it is going and the local horizontal. Steepens as it comes down.
+    const dAlt = -120 * 1.6 * Math.pow(Math.max(1e-6, 1 - t), 0.6)   // km / unit t
+    const fpa = Math.atan2(dAlt, span) * 180 / Math.PI
+    descentHud.value = {
+      alt_km: (120 * Math.pow(1 - t, 1.6) + 4).toFixed(0),
+      fpa_deg: fpa.toFixed(1),
+      downrange_km: Math.round(t * span).toLocaleString(),
+      span_km: Math.round(span).toLocaleString(),
+      pct: Math.round(t * 100),
+      entry: descentMeta ? `${descentMeta.entry_lat ?? '—'}, ${descentMeta.entry_lon ?? '—'}` : null,
+      incl: descentMeta && descentMeta.inclination_deg,
+      bc: descentMeta && descentMeta.ballistic_coefficient,
+    }
+  }, 120)
+}
+
+function stopFollowing() {
+  following.value = false
+  descentHud.value = null
+  if (hudTimer) { clearInterval(hudTimer); hudTimer = null }
+  if (viewer) {
+    // release the lookAt transform or the camera stays welded to the last frame
+    viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY)
+    viewer.trackedEntity = undefined
+    viewer.camera.flyHome(1.4)
+  }
+}
+function addDescentAnimation(fp, base) {
+  const line = fp.centreline
+  if (!Array.isArray(line) || line.length < 2) return
+  const ENTRY_ALT = 120000                   // entry interface, ~120 km
+  descentProgress = 0
+  descentLastTick = performance.now()
+
+  const at = (frac) => {
+    const t = Math.min(0.9999, Math.max(0, frac))
+    const i = Math.min(line.length - 2, Math.floor(t * (line.length - 1)))
+    const f = t * (line.length - 1) - i
+    const lat = line[i].lat + (line[i + 1].lat - line[i].lat) * f
+    const lon = line[i].lon + (line[i + 1].lon - line[i].lon) * f
+    // altitude falls off steeply late in the track, like a decaying entry
+    const alt = ENTRY_ALT * Math.pow(1 - t, 1.6) + 4000
+    return Cesium.Cartesian3.fromDegrees(lon, lat, alt)
+  }
+  const phase = () => descentProgress
+  descentAt = at
+
+  descentFp = fp
+  hasDescent.value = true
+  descentEntity = viewer.entities.add({
+    name: 'Descending stage (animated)',
+    description: 'The re-entry the corridor describes — entry interface to impact, looped.',
+    position: new Cesium.CallbackProperty(() => at(phase()), false),
+    point: {
+      pixelSize: 11,
+      color: Cesium.Color.fromCssColorString('#ffb347'),
+      outlineColor: Cesium.Color.fromCssColorString('#ff5f56'),
+      outlineWidth: 2,
+      disableDepthTestDistance: Number.POSITIVE_INFINITY,
+    },
+    // The actual stage: the rocket-body model that was sitting unused in
+    // public/models. Oriented along its own velocity, so it flies nose-first.
+    model: {
+      uri: '/models/types/rocket_body.glb',
+      minimumPixelSize: 56,
+      maximumScale: 30000,
+    },
+    orientation: new Cesium.VelocityOrientationProperty(
+      new Cesium.CallbackProperty(() => at(phase()), false),
+    ),
+  })
+  deorbitEntities.push(descentEntity)
+  // the trail — a short streak behind the marker
+  deorbitEntities.push(viewer.entities.add({
+    polyline: {
+      positions: new Cesium.CallbackProperty(() => {
+        const now = phase()
+        const pts = []
+        for (let k = 0; k <= 10; k++) pts.push(at(now - k * 0.012))
+        return pts
+      }, false),
+      width: 7,
+      material: new Cesium.PolylineGlowMaterialProperty({
+        glowPower: 0.35,
+        color: Cesium.Color.fromCssColorString('#ffb347').withAlpha(0.85),
+      }),
+    },
+  }))
+}
+
+function drawDeorbit(d) {
+  descentMeta = d
+  drawGroundUnder(d && d.footprint)
+  if (!viewer) return
+  clearDeorbit()
+  if (!d || !d.footprint || d.footprint.unresolved) return
+  const fp = d.footprint
+  const pts = fp.points || []
+  if (!pts.length) return
+
+  // Colour by outcome: red once the casualty limit is exceeded.
+  const over = d.casualty && d.casualty.ec >= 0.0001
+  const base = over ? cssVar('--color-red') : cssVar('--accent-blue')
+
+  // A DISTRIBUTION IS NOT A PATH.
+  //
+  // This previously drew a polyline through `fp.points`, which are Monte Carlo
+  // samples in SAMPLE ORDER — i.e. random. The result crossed itself hundreds
+  // of times and read as a flight path the object might take, when it is
+  // really a cloud of possible impact points. Three separate things are drawn
+  // instead, each of which is honest on its own terms:
+  //
+  //   1. the +/-2 sigma corridor, as a translucent ribbon
+  //   2. the nominal ground track, as a single clean line
+  //   3. the samples, as a scatter — the correct way to draw a distribution
+
+  // 1. dispersion corridor
+  if (Array.isArray(fp.corridor) && fp.corridor.length > 3) {
+    deorbitEntities.push(viewer.entities.add({
+      name: `${d.name} — 2σ dispersion corridor`,
+      description: `${fp.samples.toLocaleString()} Monte Carlo samples · span ${fp.span_km} km · cross-track 1σ ${fp.cross_track_sigma_km} km · driven by ${fp.dispersion.driven_by}`,
+      polygon: {
+        hierarchy: new Cesium.PolygonHierarchy(
+          fp.corridor.map((p) => Cesium.Cartesian3.fromDegrees(p.lon, p.lat)),
+        ),
+        material: Cesium.Color.fromCssColorString(base).withAlpha(0.16),
+        outline: true,
+        outlineColor: Cesium.Color.fromCssColorString(base).withAlpha(0.9),
+        height: 0,
+      },
+    }))
+  }
+
+  // 1b. name the thing. An unlabelled red ribbon across three continents
+  // reads as a rendering artefact, not a result.
+  if (Array.isArray(fp.centreline) && fp.centreline.length > 2) {
+    const mid = fp.centreline[Math.floor(fp.centreline.length / 2)]
+    const ecTxt = d.casualty && Number.isFinite(d.casualty.ec)
+      ? `Ec ${d.casualty.ec.toExponential(1)} — ${d.casualty.within_limit ? 'within' : (d.casualty.ec / 1e-4).toFixed(0) + '× over'} the legal limit`
+      : 'casualty risk unresolved'
+    deorbitEntities.push(viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(mid.lon, mid.lat, 120000),
+      label: {
+        text: `${d.name || 'RE-ENTRY'} — dispersion corridor\n${ecTxt}`,
+        font: '600 13px "JetBrains Mono", monospace',
+        fillColor: Cesium.Color.WHITE,
+        showBackground: true,
+        backgroundColor: Cesium.Color.BLACK.withAlpha(0.72),
+        backgroundPadding: new Cesium.Cartesian2(10, 6),
+        pixelOffset: new Cesium.Cartesian2(0, -18),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+    }))
+  }
+
+  addDescentAnimation(fp, base)
+
+  // 2. nominal ground track
+  if (Array.isArray(fp.centreline) && fp.centreline.length > 1) {
+    deorbitEntities.push(viewer.entities.add({
+      name: `${d.name} — nominal ground track`,
+      polyline: {
+        positions: fp.centreline.map((p) => Cesium.Cartesian3.fromDegrees(p.lon, p.lat, 40000)),
+        width: 5,
+        material: new Cesium.PolylineDashMaterialProperty({
+          color: Cesium.Color.fromCssColorString('#ffb347'),
+          gapColor: Cesium.Color.fromCssColorString('#ff5f56').withAlpha(0.35),
+          dashLength: 16,
+        }),
+      },
+    }))
+  }
+
+  // 3. the samples themselves
+  for (let i = 0; i < pts.length; i += 2) {
+    deorbitEntities.push(viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(pts[i].lon, pts[i].lat, 20000),
+      point: {
+        pixelSize: 3,
+        color: Cesium.Color.fromCssColorString(base).withAlpha(0.5),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+    }))
+  }
+
+  // Entry interface — where it starts coming apart.
+  if (d.entry_interface) {
+    deorbitEntities.push(viewer.entities.add({
+      name: 'Entry interface',
+      description: `${d.entry_interface.alt_km} km · ${d.entry_interface.time}`,
+      position: Cesium.Cartesian3.fromDegrees(d.entry_interface.lon, d.entry_interface.lat, d.entry_interface.alt_km * 1000),
+      point: { pixelSize: 11, color: Cesium.Color.fromCssColorString(cssVar('--color-amber')), outlineColor: Cesium.Color.BLACK, outlineWidth: 2, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+      label: {
+        text: `ENTRY INTERFACE ${d.entry_interface.alt_km} km`,
+        font: '600 11px "JetBrains Mono", monospace',
+        fillColor: Cesium.Color.fromCssColorString(cssVar('--color-amber')),
+        pixelOffset: new Cesium.Cartesian2(0, -20),
+        showBackground: true, backgroundColor: Cesium.Color.BLACK.withAlpha(0.6),
+      },
+    }))
+  }
+
+  // Frame the corridor.
+  const lats = pts.map((p) => p.lat), lons = pts.map((p) => p.lon)
+  viewer.camera.flyTo({
+    destination: Cesium.Rectangle.fromDegrees(
+      Math.min(...lons) - 3, Math.min(...lats) - 3,
+      Math.max(...lons) + 3, Math.max(...lats) + 3,
+    ),
+    duration: 1.6,
+  })
+}
+
+watch(() => props.deorbit, (d) => { if (viewer) (d ? drawDeorbit(d) : clearDeorbit()) }, { deep: true })
+
 // --- Launch trajectory drawing + rocket animation ---
 const launchEntities = []
 let launchTimer = null, launchRocket = null
@@ -1128,18 +2174,18 @@ function drawLaunch(p) {
   // launch site
   launchEntities.push(viewer.entities.add({
     position: cart(p.launch_site_ecef),
-    point: { pixelSize: 12, color: Cesium.Color.fromCssColorString('#22d3ee'), outlineColor: Cesium.Color.WHITE, outlineWidth: 2, disableDepthTestDistance: Number.POSITIVE_INFINITY },
-    label: { text: 'LAUNCH SITE', font: '700 11px ui-monospace, monospace', fillColor: Cesium.Color.fromCssColorString('#22d3ee'),
+    point: { pixelSize: 12, color: Cesium.Color.fromCssColorString(cssVar('--accent-blue')), outlineColor: Cesium.Color.WHITE, outlineWidth: 2, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+    label: { text: 'LAUNCH SITE', font: '700 11px ui-monospace, monospace', fillColor: Cesium.Color.fromCssColorString(cssVar('--accent-blue')),
       showBackground: true, backgroundColor: Cesium.Color.fromCssColorString('#050a12').withAlpha(0.9), pixelOffset: new Cesium.Cartesian2(0, -18), disableDepthTestDistance: Number.POSITIVE_INFINITY },
   }))
   // ascent (orange) + target orbit (cyan)
-  launchEntities.push(viewer.entities.add({ polyline: { positions: ascent, width: 3.5, arcType: Cesium.ArcType.NONE, material: new Cesium.PolylineGlowMaterialProperty({ glowPower: 0.3, color: Cesium.Color.fromCssColorString('#f59e0b') }) } }))
-  launchEntities.push(viewer.entities.add({ polyline: { positions: ring, width: 2.5, arcType: Cesium.ArcType.NONE, material: new Cesium.PolylineGlowMaterialProperty({ glowPower: 0.25, color: Cesium.Color.fromCssColorString('#22d3ee') }) } }))
+  launchEntities.push(viewer.entities.add({ polyline: { positions: ascent, width: 3.5, arcType: Cesium.ArcType.NONE, material: new Cesium.PolylineGlowMaterialProperty({ glowPower: 0.3, color: Cesium.Color.fromCssColorString(cssVar('--color-amber')) }) } }))
+  launchEntities.push(viewer.entities.add({ polyline: { positions: ring, width: 2.5, arcType: Cesium.ArcType.NONE, material: new Cesium.PolylineGlowMaterialProperty({ glowPower: 0.25, color: Cesium.Color.fromCssColorString(cssVar('--accent-blue')) }) } }))
   // animated rocket
   launchRocket = viewer.entities.add({
     position: ascent[0],
-    point: { pixelSize: 11, color: Cesium.Color.WHITE, outlineColor: Cesium.Color.fromCssColorString('#f59e0b'), outlineWidth: 3, disableDepthTestDistance: Number.POSITIVE_INFINITY },
-    label: { text: '▲ VEHICLE', font: '700 10px ui-monospace, monospace', fillColor: Cesium.Color.WHITE, showBackground: true, backgroundColor: Cesium.Color.fromCssColorString('#f59e0b').withAlpha(0.9), pixelOffset: new Cesium.Cartesian2(0, -16), disableDepthTestDistance: Number.POSITIVE_INFINITY },
+    point: { pixelSize: 11, color: Cesium.Color.WHITE, outlineColor: Cesium.Color.fromCssColorString(cssVar('--color-amber')), outlineWidth: 3, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+    label: { text: '▲ VEHICLE', font: '700 10px ui-monospace, monospace', fillColor: Cesium.Color.WHITE, showBackground: true, backgroundColor: Cesium.Color.fromCssColorString(cssVar('--color-amber')).withAlpha(0.9), pixelOffset: new Cesium.Cartesian2(0, -16), disableDepthTestDistance: Number.POSITIVE_INFINITY },
   })
   launchEntities.push(launchRocket)
   launchActive.value = true
@@ -1175,7 +2221,7 @@ function simulateLaunch() {
   }, 40)
 }
 watch(() => props.launchPlan, (p) => { if (viewer) (p ? drawLaunch(p) : (currentLaunch = null, clearLaunch())) })
-defineExpose({ agentShowConjunction, agentReroute, simulateLaunch, agentTrack, agentZoom })
+defineExpose({ agentShowConjunction, agentReroute, simulateLaunch, agentTrack, agentZoom, playApproach, stopApproach, showGlobalGround })
 
 // --- Reroute planning from the left "predicted close approaches" panel ---
 const selectedConj = ref(null)
@@ -1249,8 +2295,29 @@ function agentZoom(dir) {
     duration: 1.1,
   })
 }
+/**
+ * How many conjunctions carry a printed range label.
+ *
+ * Cesium has no decluttering for entity labels, so labelling all of them
+ * meant a dozen "6.3 km" chips stacked on top of each other wherever the
+ * events happened to cluster — which is most of the time, because debris
+ * conjunctions cluster in the same shells. Every dot is still hoverable
+ * and clickable; only the tightest few get a permanent label, and the
+ * selected one always does.
+ */
+const CONJ_LABEL_LIMIT = 4
+
 function drawConjunctions(list) {
   clearConjunctions()
+  // Tightest miss distance first — those are the ones worth naming on sight.
+  const labelOrder = [...list].filter((c) => c.p1 && c.p2)
+    .sort((a, b) => (a.missKm ?? 1e9) - (b.missKm ?? 1e9))
+    .slice(0, CONJ_LABEL_LIMIT)
+  const labelled = new Map(labelOrder.map((c, i) => [c, i]))
+  // Alternate above / below the dot. Four labels all sitting 20px above their
+  // marker still collide when two events are close together on screen; sending
+  // every other one below the dot doubles the effective spacing for free.
+  const OFFSETS = [-22, 26, -22, 26]
   for (const c of list) {
     if (!c.p1 || !c.p2) continue                   // ECEF positions at TCA from the gateway
     const pa = new Cesium.Cartesian3(c.p1.x, c.p1.y, c.p1.z)
@@ -1264,9 +2331,24 @@ function drawConjunctions(list) {
     const dotEnt = viewer.entities.add({
       position: mid,
       point: { pixelSize: 13, color: col.withAlpha(0.85), outlineColor: Cesium.Color.WHITE, outlineWidth: 1, disableDepthTestDistance: Number.POSITIVE_INFINITY },
-      label: { text: c.missKm.toFixed(1) + ' km', font: '11px ui-monospace, monospace', fillColor: col,
-        showBackground: true, backgroundColor: Cesium.Color.fromCssColorString('#0a1018').withAlpha(0.85),
-        pixelOffset: new Cesium.Cartesian2(0, -18), disableDepthTestDistance: Number.POSITIVE_INFINITY },
+      label: labelled.has(c) ? {
+        text: c.missKm.toFixed(1) + ' km',
+        // SYSTEM font only — never a webfont. Cesium rasterises labels onto a
+        // canvas using measured glyph advances; if the webfont has not finished
+        // loading at raster time the advances come back wrong and the glyphs
+        // draw on top of each other ("5.2 km" rendered as overlapping mush).
+        // A system stack is always resolvable, so the metrics are always right.
+        font: 'bold 12px ui-monospace, "DejaVu Sans Mono", Menlo, Consolas, monospace',
+        fillColor: col,
+        showBackground: true,
+        backgroundColor: Cesium.Color.fromCssColorString(cssVar('--bg-deep')).withAlpha(0.88),
+        backgroundPadding: new Cesium.Cartesian2(7, 5),
+        pixelOffset: new Cesium.Cartesian2(0, OFFSETS[labelled.get(c) % OFFSETS.length]),
+        verticalOrigin: OFFSETS[labelled.get(c) % OFFSETS.length] < 0
+          ? Cesium.VerticalOrigin.BOTTOM
+          : Cesium.VerticalOrigin.TOP,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      } : undefined,
     })
     dotEnt._conjMeta = c                       // clickable / hoverable conjunction dot
     conjEntities.push(lineEnt, dotEnt)
@@ -1289,7 +2371,7 @@ function isolateConjunction(c) {
     if (!p) continue
     selectionEnts.push(viewer.entities.add({
       position: new Cesium.Cartesian3(p.x, p.y, p.z),
-      point: { pixelSize: 28, color: Cesium.Color.TRANSPARENT, outlineColor: Cesium.Color.fromCssColorString('#a855f7'), outlineWidth: 3, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+      point: { pixelSize: 28, color: Cesium.Color.TRANSPARENT, outlineColor: Cesium.Color.fromCssColorString(cssVar('--color-purple')), outlineWidth: 3, disableDepthTestDistance: Number.POSITIVE_INFINITY },
     }))
   }
 }
@@ -1576,49 +2658,114 @@ onUnmounted(() => {
   width: 100%;
   height: 100%;
 }
-.sat-search {
+/* =====================================================================
+   HUD ZONES
+
+   Every floating element on the globe belongs to exactly ONE of these
+   containers. Nothing on the globe is positioned by a hand-picked pixel
+   offset any more, which is the only reason the old HUD overlapped:
+   six elements each choosing their own `top` and `bottom` will always
+   eventually choose the same one.
+   ================================================================== */
+.hud-top,
+.hud-bottom {
   position: absolute;
-  top: 16px;
   left: 50%;
   transform: translateX(-50%);
-  width: 340px;
-  z-index: 5;
-  font: 13px/1.3 ui-monospace, monospace;
+  z-index: var(--z-globe-hud);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s3);
+  width: min(460px, calc(100% - var(--s7)));
+  /* The zone itself must not eat globe drags — only its contents. */
+  pointer-events: none;
+}
+.hud-top { top: var(--s4); }
+.hud-bottom { bottom: var(--s5); align-items: center; }
+.hud-top > *,
+.hud-bottom > * { pointer-events: auto; }
+
+/* ---------------- search ---------------- */
+.sat-search {
+  position: relative;
+  /* Above the launch HUD below it, so the results dropdown lands ON the
+     HUD rather than being painted under it by source order. */
+  z-index: 2;
+  width: 100%;
+  max-width: 380px;
+  font-family: var(--font-mono);
+  font-size: var(--t-body);
+}
+.sat-search-icon {
+  position: absolute;
+  left: 13px;
+  top: 12px;
+  display: flex;
+  color: var(--text-dim);
+  pointer-events: none;
 }
 .sat-search-input {
   width: 100%;
-  box-sizing: border-box;
-  padding: 9px 14px;
-  background: rgba(8, 14, 24, 0.85);
-  border: 1px solid #2b6cb0;
-  border-radius: 6px;
-  color: #e8f1ff;
+  height: 38px;
+  padding: 0 34px 0 34px;
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--border-bright);
+  border-radius: var(--r1);
+  color: var(--text-primary);
+  font: 400 var(--t-body)/1 var(--font-mono);
   outline: none;
-  backdrop-filter: blur(4px);
+  box-shadow: var(--e2);
+  transition: border-color var(--dur-1);
 }
-.sat-search-input::placeholder { color: rgba(148, 163, 184, 0.55); }
-.sat-search-input:focus { border-color: #4a9eff; }
+.sat-search-input::placeholder { color: var(--text-dim); }
+.sat-search-input:focus { border-color: var(--accent-blue); }
+.sat-search:focus-within .sat-search-icon { color: var(--accent-blue); }
+.sat-search-clear {
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r1);
+  background: none;
+  color: var(--text-dim);
+  font-size: 16px;
+  line-height: 1;
+}
+.sat-search-clear:hover { color: var(--text-primary); background: var(--hover-wash); }
+
 .sat-search-results {
-  margin-top: 6px;
-  background: rgba(8, 14, 24, 0.95);
-  border: 1px solid #1e3a5f;
-  border-radius: 6px;
-  overflow: hidden;
-  backdrop-filter: blur(4px);
+  position: absolute;
+  top: calc(100% + var(--s2));
+  left: 0;
+  right: 0;
+  max-height: 46vh;
+  overflow-y: auto;
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--border-bright);
+  border-radius: var(--r1);
+  box-shadow: var(--e3);
 }
 .sat-search-row {
   display: flex;
   flex-direction: column;
-  gap: 1px;
-  padding: 7px 14px;
+  gap: 3px;
+  padding: 9px 14px;
   cursor: pointer;
-  border-bottom: 1px solid rgba(30, 58, 95, 0.5);
+  border-bottom: 1px solid var(--border);
 }
 .sat-search-row:last-child { border-bottom: none; }
-.sat-search-row:hover { background: rgba(30, 60, 100, 0.6); }
-.ssr-name { color: #e8f1ff; font-weight: 600; }
-.ssr-meta { color: #7fa8d0; font-size: 11px; }
-.sat-search-row.fetch { color: #4a9eff; font-weight: 600; }
+.sat-search-row:hover { background: var(--hover-wash); }
+.ssr-name { color: var(--text-primary); font-size: var(--t-body); font-weight: 500; }
+.ssr-meta { color: var(--text-dim); font-size: var(--t-label); }
+.sat-search-row.fetch { color: var(--accent-blue); font-weight: 600; }
 /* Left-edge tab for the conjunctions sidebar */
 .conj-tab {
   position: absolute;
@@ -1639,6 +2786,7 @@ onUnmounted(() => {
   box-shadow: 0 0 18px rgba(239,68,68,0.22), 2px 0 12px rgba(0,0,0,0.4);
   transition: transform 0.28s ease, background 0.15s;
 }
+.conj-tab { display: none; }   /* superseded by the dock's Risk Monitor */
 .conj-tab.shifted { transform: translateX(300px); }
 .conj-tab:hover { background: rgba(239,68,68,0.28); }
 .conj-tab-label { writing-mode: vertical-rl; text-orientation: mixed; transform: rotate(180deg); font: 700 10px/1 ui-monospace, monospace; letter-spacing: 0.14em; }
@@ -1662,11 +2810,11 @@ onUnmounted(() => {
   font: 12px/1.3 ui-monospace, monospace;
 }
 .conj-panel.open { transform: translateX(0); }
-.conj-refresh { float: right; background: none; border: none; color: #6f8eae; cursor: pointer; font-size: 13px; }
-.conj-refresh:hover { color: #fff; }
+.conj-refresh { float: right; background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 13px; }
+.conj-refresh:hover { color: var(--text-primary); }
 .conj-refresh.spin { animation: cspin 1s linear infinite; display: inline-block; }
 @keyframes cspin { to { transform: rotate(360deg); } }
-.conj-empty { color: #5f7e9f; font-size: 11px; padding: 12px 4px; }
+.conj-empty { color: var(--text-dim); font-size: 11px; padding: 12px 4px; }
 .conj-list { overflow-y: auto; flex: 1; min-height: 0; }
 .conj-scan {
   width: 100%;
@@ -1681,294 +2829,471 @@ onUnmounted(() => {
   backdrop-filter: blur(4px);
 }
 .conj-scan:disabled { cursor: default; opacity: 0.85; }
-.conj-scan:not(:disabled):hover { background: rgba(70, 20, 20, 0.95); border-color: #ff5b4f; }
+.conj-scan:not(:disabled):hover { background: rgba(70, 20, 20, 0.95); border-color: var(--color-red); }
 .conj-bar { height: 3px; margin-top: 4px; background: rgba(176, 65, 59, 0.25); border-radius: 2px; overflow: hidden; }
-.conj-bar-fill { height: 100%; background: #ff5b4f; transition: width 0.2s; }
+.conj-bar-fill { height: 100%; background: var(--color-red); transition: width 0.2s; }
 .conj-list {
   margin-top: 8px;
-  max-height: calc(100vh - 210px);
+  /* was max-height: calc(100vh - 210px) — a viewport measurement inside a
+     flex child, which overflowed its own parent whenever the two
+     disagreed. The flex rule above already sizes it correctly. */
   overflow-y: auto;
-  background: rgba(8, 14, 24, 0.9);
-  border: 1px solid #1e3a5f;
-  border-radius: 6px;
-  backdrop-filter: blur(4px);
+  background: var(--glass-strong);
+  border: 1px solid var(--border);
+  border-radius: var(--r1);
 }
 .conj-list::-webkit-scrollbar { width: 6px; }
-.conj-list::-webkit-scrollbar-thumb { background: #2b6cb0; border-radius: 3px; }
-.conj-head { padding: 7px 12px; color: #7fa8d0; font-size: 10px; letter-spacing: 0.08em; border-bottom: 1px solid #1e3a5f; }
+.conj-list::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 3px; }
+.conj-head { padding: 7px 12px; color: var(--text-secondary); font-size: 10px; letter-spacing: 0.08em; border-bottom: 1px solid var(--bg-panel-2); }
 .conj-row { padding: 7px 12px; cursor: pointer; border-bottom: 1px solid rgba(30, 58, 95, 0.5); }
 .conj-row:hover { background: rgba(30, 60, 100, 0.5); }
-.conj-row.selected { background: rgba(59, 130, 246, 0.22); box-shadow: inset 3px 0 0 #3b82f6; }
-.conj-names { color: #e8f1ff; font-weight: 600; }
-.conj-names .x { color: #ff6b6b; }
+.conj-row.selected { background: rgba(201, 162, 39, 0.22); box-shadow: inset 3px 0 0 var(--accent-blue); }
+.conj-names { color: var(--text-primary); font-weight: 600; }
+.conj-names .x { color: var(--color-red); }
 .conj-meta { display: flex; gap: 10px; margin-top: 2px; color: #8fb0d0; font-size: 11px; }
 .conj-miss { font-weight: 700; }
-.conj-pc { color: #5f7e9f; font-size: 10px; margin-top: 1px; }
-.conj-foot { padding: 6px 12px; color: #5f7e9f; font-size: 9px; font-style: italic; }
+.conj-pc { color: var(--text-dim); font-size: 10px; margin-top: 1px; }
+.conj-foot { padding: 6px 12px; color: var(--text-dim); font-size: 9px; font-style: italic; }
 
-/* Reroute action + result */
+/* ---------------- bottom-stack actions ---------------- */
 .reroute-actions {
-  position: fixed;
-  left: 50%;
-  bottom: 96px;
-  transform: translateX(-50%);
-  z-index: 200;
   display: flex;
-  gap: 10px;
+  gap: var(--s2);
+  flex-wrap: wrap;
+  justify-content: center;
 }
 .reroute-btn2 {
-  padding: 13px 26px;
-  background: rgba(5, 10, 18, 0.96);
-  border: 1.5px solid #3b82f6;
-  border-radius: 8px;
-  color: #dce9ff;
-  font: 700 13px/1 ui-monospace, monospace;
-  letter-spacing: 0.1em;
+  height: 40px;
+  padding: 0 var(--s5);
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--border-bright);
+  border-radius: var(--r1);
+  color: var(--text-primary);
+  font: 600 11px/40px var(--font-mono);
+  letter-spacing: 0.14em;
   cursor: pointer;
-  box-shadow: 0 0 20px rgba(59,130,246,0.5), 0 8px 24px rgba(0,0,0,0.7);
-  transition: all 0.15s;
+  box-shadow: var(--e2);
+  transition: background var(--dur-1), border-color var(--dur-1), color var(--dur-1);
 }
-.reroute-btn2:not(:disabled):hover { background: rgba(16, 32, 58, 0.98); box-shadow: 0 0 30px rgba(59,130,246,0.8), 0 8px 24px rgba(0,0,0,0.7); }
-.reroute-btn2:disabled { opacity: 0.85; cursor: wait; }
-.reroute-btn2.back { border-color: #5f7e9f; color: #cdd9e6; box-shadow: 0 8px 24px rgba(0,0,0,0.7); }
-.reroute-btn2.back:hover { background: rgba(30, 42, 60, 0.98); border-color: #9fb6d0; }
-.reroute-btn2.launch { border-color: #f59e0b; color: #ffe6bd; box-shadow: 0 0 20px rgba(245,158,11,0.5), 0 8px 24px rgba(0,0,0,0.7); }
-.reroute-btn2.launch:hover { background: rgba(58, 40, 12, 0.98); box-shadow: 0 0 30px rgba(245,158,11,0.8), 0 8px 24px rgba(0,0,0,0.7); }
+.reroute-btn2:hover { background: var(--bg-panel-2); border-color: var(--text-dim); }
+.reroute-btn2:disabled { opacity: 0.6; cursor: wait; }
+/* Exactly one button in the group is the primary action, and it is the
+   only one carrying the accent. Everything used to glow at once. */
+.reroute-btn2.primary { border-color: var(--accent-blue); color: var(--accent-blue); }
+.reroute-btn2.primary:not(:disabled):hover { background: var(--accent-blue-dim); }
+.reroute-btn2.back { color: var(--text-secondary); }
+.reroute-btn2.launch { border-color: var(--color-amber); color: var(--color-amber); }
+.reroute-btn2.launch:hover { background: var(--color-amber-dim); }
 
+/* ---------------- reroute result card ----------------
+   Anchored INSIDE the globe column (absolute, not fixed), so it can no
+   longer be laid over the dock on a narrow window; and it steps aside
+   when the filter drawer opens instead of sitting underneath it. */
 .reroute-card {
-  position: fixed;
-  top: 64px;
-  right: 60px;
-  width: 330px;
-  z-index: 200;
-  padding: 12px;
-  border: 1.5px solid rgba(59,130,246,0.55);
-  border-radius: 8px;
-  background: rgba(6, 12, 22, 0.96);
-  box-shadow: 0 0 22px rgba(59,130,246,0.4), 0 8px 24px rgba(0,0,0,0.7);
-  font: 12px/1.4 ui-monospace, monospace;
-}
-.rc-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-.rc-title { color: #60a5fa; font-weight: 700; font-size: 11px; letter-spacing: 0.08em; }
-.rc-close { color: #5f7e9f; font-size: 18px; line-height: 1; cursor: pointer; padding: 0 4px; }
-.rc-close:hover { color: #fff; }
-.rc-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; margin-bottom: 9px; }
-.rc-stats > div { display: flex; flex-direction: column; gap: 1px; }
-.rc-stats span { color: #5f7e9f; font-size: 8px; letter-spacing: 0.08em; }
-.rc-stats b { color: #e8f1ff; font-size: 12px; }
-.rc-stats b.ok { color: #34d399; }
-.rc-stats b.bad { color: #f87171; }
-.rc-mans { display: flex; flex-direction: column; gap: 6px; }
-.rc-man { border-left: 2px solid rgba(59,130,246,0.5); padding-left: 8px; display: flex; flex-direction: column; gap: 1px; }
-.rc-sat { color: #cfe0ff; font-weight: 700; font-size: 10px; }
-.rc-act { color: #9fc0e0; font-size: 11px; }
-.rc-act b { color: #60a5fa; }
-.rc-deb { color: #6f8eae; font-size: 10px; font-style: italic; }
-.rc-legend { display: flex; gap: 14px; margin-top: 9px; font-size: 9px; }
-.rc-legend .lg-red { color: #ef4444; }
-.rc-legend .lg-blue { color: #3b82f6; }
-
-/* Launch telemetry HUD (top-center) */
-.launch-hud {
   position: absolute;
-  top: 58px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 60;
+  top: var(--s4);
+  right: var(--s5);
+  width: 320px;
+  max-height: calc(100% - var(--s7));
+  overflow-y: auto;
+  z-index: var(--z-globe-hud);
+  padding: var(--s4);
+  border: 1px solid var(--border-bright);
+  border-radius: var(--r2);
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--e3);
+  font-family: var(--font-mono);
+  font-size: var(--t-body);
+  line-height: 1.5;
+  transition: right var(--dur-3) var(--ease);
+}
+.reroute-card.shifted { right: calc(240px + var(--s5)); }
+.rc-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--s3); }
+.rc-title { color: var(--color-green); font-weight: 700; font-size: var(--t-label); letter-spacing: 0.14em; }
+.rc-close { background: none; color: var(--text-dim); font-size: 18px; line-height: 1; cursor: pointer; padding: 0 4px; }
+.rc-close:hover { color: var(--text-primary); }
+.rc-stats { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3); margin-bottom: var(--s3); }
+.rc-stats > div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.rc-stats span { color: var(--text-dim); font-size: var(--t-micro); letter-spacing: 0.14em; }
+.rc-stats b { color: var(--text-primary); font-size: var(--t-body); font-weight: 600; }
+.rc-stats b.ok { color: var(--color-green); }
+.rc-stats b.bad { color: var(--color-red); }
+.rc-mans { display: flex; flex-direction: column; gap: var(--s2); }
+.rc-man { border-left: 2px solid var(--border-bright); padding-left: var(--s3); display: flex; flex-direction: column; gap: 2px; }
+.rc-sat { color: var(--text-primary); font-weight: 700; font-size: var(--t-label); letter-spacing: 0.06em; }
+.rc-act { color: var(--text-secondary); font-size: var(--t-body); }
+.rc-act b { color: var(--text-primary); }
+.rc-deb { color: var(--text-dim); font-size: var(--t-label); font-style: italic; }
+.rc-legend { display: flex; gap: var(--s4); flex-wrap: wrap; margin-top: var(--s3); padding-top: var(--s3); border-top: 1px solid var(--border); font-size: var(--t-micro); }
+
+/* ---------------- launch telemetry ---------------- */
+.launch-hud {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 10px 16px;
-  background: rgba(5, 10, 18, 0.92);
-  border: 1px solid rgba(245, 158, 11, 0.5);
-  border-radius: 8px;
-  box-shadow: 0 0 20px rgba(245, 158, 11, 0.25), 0 6px 18px rgba(0,0,0,0.6);
-  min-width: 420px;
+  gap: var(--s3);
+  padding: var(--s3) var(--s5);
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--border-bright);
+  border-left: 2px solid var(--color-amber);
+  border-radius: var(--r1);
+  box-shadow: var(--e2);
+  width: 100%;
 }
-.lh-phase { font: 700 11px/1 ui-monospace, monospace; letter-spacing: 0.12em; color: #f59e0b; text-align: center; }
-.lh-stats { display: flex; gap: 22px; justify-content: center; }
-.lh-stats > div { display: flex; flex-direction: column; align-items: center; gap: 2px; }
-.lh-stats span { font: 8px/1 ui-monospace, monospace; letter-spacing: 0.1em; color: #6f8eae; }
-.lh-stats b { font: 700 16px/1 ui-monospace, monospace; color: #e8f1ff; display: flex; align-items: baseline; gap: 3px; }
-.lh-stats b i { font: 400 9px/1 ui-monospace, monospace; color: #6f8eae; font-style: normal; }
-.lh-eta { font-size: 11px !important; color: #34d399 !important; }
+.lh-phase {
+  font: 600 var(--t-label)/1 var(--font-mono);
+  letter-spacing: 0.18em;
+  color: var(--color-amber);
+  text-align: center;
+  text-transform: uppercase;
+}
+.lh-stats { display: flex; justify-content: space-around; gap: var(--s4); }
+.lh-stats > div { display: flex; flex-direction: column; align-items: center; gap: 5px; }
+.lh-stats span { font: var(--t-micro)/1 var(--font-mono); letter-spacing: 0.16em; color: var(--text-dim); }
+.lh-stats b {
+  font: 600 var(--t-num)/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+  display: flex; align-items: baseline; gap: 3px;
+}
+.lh-stats b i { font: 400 var(--t-label)/1 var(--font-mono); color: var(--text-dim); font-style: normal; }
+.lh-eta { font-size: var(--t-body) !important; color: var(--color-green) !important; }
 
-/* Route hover tooltip */
+/* ---------------- route tooltip + detail ---------------- */
 .route-tip {
   position: absolute;
-  z-index: 300;
+  z-index: var(--z-float);
   pointer-events: none;
-  padding: 5px 9px;
-  background: rgba(5, 10, 18, 0.95);
-  border: 1px solid #3b82f6;
-  border-radius: 5px;
-  font: 600 11px/1.3 ui-monospace, monospace;
+  padding: 6px 10px;
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--border-bright);
+  border-radius: var(--r1);
+  box-shadow: var(--e2);
+  font: 600 var(--t-body)/1.3 var(--font-mono);
 }
 .rt-sat { font-weight: 700; }
-.rt-type { color: #9fb6d0; font-size: 9px; margin-top: 2px; letter-spacing: 0.06em; }
+.rt-type { color: var(--text-dim); font-size: var(--t-micro); margin-top: 3px; letter-spacing: 0.14em; }
 
-/* Clicked route detail */
 .route-sel {
-  position: absolute;
-  left: 50%;
-  bottom: 150px;
-  transform: translateX(-50%);
-  z-index: 250;
-  min-width: 280px;
-  padding: 11px 14px;
-  background: rgba(5, 10, 18, 0.97);
-  border: 1.5px solid #3b82f6;
-  border-radius: 8px;
-  box-shadow: 0 0 20px rgba(0,0,0,0.6);
-  font: 12px/1.45 ui-monospace, monospace;
+  position: relative;
+  width: 100%;
+  padding: var(--s3) var(--s7) var(--s3) var(--s4);
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--border-bright);
+  border-left-width: 2px;
+  border-radius: var(--r1);
+  box-shadow: var(--e2);
+  font-family: var(--font-mono);
+  font-size: var(--t-body);
+  line-height: 1.45;
 }
-.rs-close { position: absolute; top: 6px; right: 9px; color: #5f7e9f; font-size: 16px; cursor: pointer; }
-.rs-close:hover { color: #fff; }
-.rs-sat { font-weight: 700; font-size: 13px; letter-spacing: 0.04em; }
-.rs-type { color: #9fb6d0; font-size: 9px; letter-spacing: 0.1em; margin: 2px 0 5px; }
-.rs-sub { color: #cfe0ff; font-size: 11px; }
+.rs-close {
+  position: absolute; top: 6px; right: 6px;
+  width: 26px; height: 26px; display: grid; place-items: center;
+  border-radius: var(--r1); background: none;
+  color: var(--text-dim); font-size: 16px; cursor: pointer;
+}
+.rs-close:hover { color: var(--text-primary); background: var(--hover-wash); }
+.rs-sat { font-weight: 700; font-size: var(--t-read); letter-spacing: 0.06em; }
+.rs-type { color: var(--text-dim); font-size: var(--t-micro); letter-spacing: 0.16em; margin: 3px 0 6px; }
+.rs-sub { color: var(--text-secondary); font-size: var(--t-body); }
+
+/* ---------------- tracking ---------------- */
 .return-btn {
   position: absolute;
-  top: 16px;
-  left: 16px;
+  top: var(--s4);
+  left: var(--s4);
+  z-index: var(--z-globe-hud);
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 2px;
-  padding: 8px 14px;
-  background: rgba(8, 14, 24, 0.82);
-  border: 1px solid #2b6cb0;
-  border-radius: 6px;
-  color: #cfe6ff;
-  font: 600 12px/1.1 ui-monospace, monospace;
-  letter-spacing: 0.06em;
+  gap: 4px;
+  padding: var(--s2) var(--s4);
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--border-bright);
+  border-radius: var(--r1);
+  box-shadow: var(--e2);
+  color: var(--text-primary);
+  font: 600 var(--t-body)/1.1 var(--font-mono);
+  letter-spacing: 0.12em;
   cursor: pointer;
-  backdrop-filter: blur(4px);
-  transition: background 0.15s, border-color 0.15s;
+  transition: background var(--dur-1), border-color var(--dur-1);
 }
-.return-btn:hover {
-  background: rgba(20, 40, 70, 0.95);
-  border-color: #4a9eff;
-}
+.return-btn:hover { background: var(--bg-panel-2); border-color: var(--text-dim); }
 .return-sub {
   font-weight: 400;
-  font-size: 10px;
-  color: #7fa8d0;
+  font-size: var(--t-label);
+  color: var(--text-dim);
   text-transform: none;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.04em;
 }
 .sat-info {
   position: absolute;
-  left: 16px;
-  bottom: 16px;
-  width: 230px;
-  padding: 12px 14px;
-  background: rgba(8, 14, 24, 0.86);
-  border: 1px solid #1e3a5f;
-  border-left: 3px solid #38bdf8;
-  border-radius: 6px;
-  color: #e8f1ff;
-  font: 12px/1.4 ui-monospace, monospace;
-  backdrop-filter: blur(4px);
-  z-index: 5;
+  left: var(--s4);
+  bottom: var(--s4);
+  width: 236px;
+  padding: var(--s4);
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--border-bright);
+  border-left: 2px solid var(--accent-blue);
+  border-radius: var(--r1);
+  box-shadow: var(--e2);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--t-body);
+  line-height: 1.4;
+  z-index: var(--z-globe-hud);
 }
-.si-name { font-size: 14px; font-weight: 700; letter-spacing: 0.03em; }
-.si-sub { color: #7fa8d0; font-size: 11px; margin-bottom: 8px; }
+.si-name { font-size: var(--t-read); font-weight: 700; letter-spacing: 0.04em; }
+.si-sub { color: var(--text-dim); font-size: var(--t-label); margin-bottom: var(--s3); }
 .si-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 6px 10px;
+  gap: var(--s2) var(--s3);
 }
-.si-grid div { display: flex; flex-direction: column; }
-.si-grid span { color: #5f7e9f; font-size: 9px; letter-spacing: 0.08em; }
+.si-grid div { display: flex; flex-direction: column; gap: 3px; font-variant-numeric: tabular-nums; }
+.si-grid span { color: var(--text-dim); font-size: var(--t-micro); letter-spacing: 0.14em; }
 .si-risk {
-  margin-top: 10px;
-  padding: 4px 8px;
+  margin-top: var(--s3);
+  padding: 5px 8px;
   border-radius: 4px;
-  font-size: 11px;
+  font-size: var(--t-label);
   font-weight: 700;
+  letter-spacing: 0.12em;
   text-align: center;
 }
-.risk-high { background: rgba(255, 59, 59, 0.18); color: #ff6b6b; border: 1px solid #ff3b3b55; }
-.risk-med  { background: rgba(255, 179, 2, 0.16); color: #ffc94d; border: 1px solid #ffb30255; }
-.risk-low  { background: rgba(57, 217, 138, 0.15); color: #4fe0a0; border: 1px solid #39d98a55; }
+/* These three used to read `1px solid var(--color-red)55` — a var()
+   followed by a bare `55`, which is not a colour, so the whole border
+   declaration was dropped and the badges rendered borderless. */
+.risk-high { background: var(--color-red-dim); color: var(--color-red); border: 1px solid rgba(255, 95, 86, 0.4); }
+.risk-med  { background: var(--color-amber-dim); color: var(--color-amber); border: 1px solid rgba(224, 163, 46, 0.4); }
+.risk-low  { background: var(--color-green-dim); color: var(--color-green); border: 1px solid rgba(76, 199, 106, 0.4); }
 
-/* Filter tab + panel (right edge) */
+/* ---------------- filter drawer ----------------
+   The trigger is a PILL. It was a 40px circle containing the 46px word
+   "FILTERS", so the label hung out of both sides of its own button. */
 .filter-tab {
-  position: fixed;
-  top: 250px;
-  right: 0;
-  z-index: 1400;
-  width: 40px;
-  height: 132px;
+  position: absolute;
+  right: var(--s5);
+  /* clears the AI tab (40px tall, --s5 from the bottom) with a gap */
+  bottom: calc(var(--s5) + 40px + var(--s2));
+  z-index: var(--z-globe-hud);
+  height: 36px;
+  padding: 0 var(--s4);
   display: flex;
   align-items: center;
-  justify-content: center;
-  padding: 0;
-  background: linear-gradient(180deg, rgba(59, 130, 246, 0.18), rgba(59, 130, 246, 0.07));
-  border: 1px solid rgba(59, 130, 246, 0.5);
-  border-right: none;
-  border-radius: 8px 0 0 8px;
-  color: #cfe6ff;
+  gap: var(--s2);
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--border);
+  border-radius: 99px;
+  box-shadow: var(--e2);
+  color: var(--text-secondary);
   cursor: pointer;
-  box-shadow: 0 0 18px rgba(59, 130, 246, 0.22), -2px 0 12px rgba(0, 0, 0, 0.4);
-  transition: all 0.18s;
+  transition: color var(--dur-1), background var(--dur-1), border-color var(--dur-1), right var(--dur-3) var(--ease);
 }
+.filter-tab-icon { display: flex; }
 .filter-tab-label {
-  writing-mode: vertical-rl;
-  text-orientation: mixed;
-  font: 700 10px/1 ui-monospace, monospace;
+  font: 600 var(--t-label)/1 var(--font-mono);
   letter-spacing: 0.16em;
 }
-.filter-tab.shifted { transform: translateX(-240px); }
-.filter-tab:hover { width: 46px; background: rgba(59, 130, 246, 0.28); }
+.filter-tab.shifted { right: calc(240px + var(--s5)); }
+.filter-tab:hover { background: var(--bg-panel-2); border-color: var(--border-bright); color: var(--text-primary); }
+.filter-tab[aria-expanded='true'] { color: var(--text-primary); border-color: var(--border-bright); }
+
 .filter-panel {
   position: absolute;
   top: 0;
   right: 0;
   width: 240px;
   height: 100%;
-  box-sizing: border-box;
-  padding: 18px 16px;
-  background: rgba(8, 14, 24, 0.92);
-  border-left: 1px solid #1e3a5f;
-  backdrop-filter: blur(6px);
+  overflow-y: auto;
+  padding: var(--s5) var(--s4);
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border-left: 1px solid var(--border);
   transform: translateX(100%);
-  transition: transform 0.28s ease;
-  z-index: 5;
-  font: 13px/1.4 ui-monospace, monospace;
+  transition: transform var(--dur-3) var(--ease);
+  z-index: var(--z-globe-panel);
+  font-family: var(--font-mono);
+  font-size: var(--t-body);
+  line-height: 1.4;
 }
 .filter-panel.open { transform: translateX(0); }
 .fp-title {
-  color: #7fa8d0;
-  font-size: 11px;
-  letter-spacing: 0.12em;
-  margin-bottom: 14px;
+  color: var(--text-dim);
+  font-size: var(--t-micro);
+  letter-spacing: 0.22em;
+  margin-bottom: var(--s4);
 }
 .fp-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 0;
+  gap: var(--s2);
+  min-height: 32px;
+  padding: 5px 6px;
+  margin: 0 -6px;
+  border-radius: var(--r1);
   cursor: pointer;
-  color: #e8f1ff;
+  color: var(--text-primary);
+  transition: background var(--dur-1);
 }
-.fp-row input { accent-color: #4a9eff; cursor: pointer; }
-.fp-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
-.fp-label { flex: 1; }
-.fp-count { color: #5f7e9f; font-size: 11px; }
-.fp-sep { height: 1px; background: #1e3a5f; margin: 10px 0; }
-.fp-row.danger { color: #ffb86b; }
-.fp-row.allobj { color: #9fd4ff; }
-.fp-hint { color: #5f7e9f; font-size: 10px; line-height: 1.3; margin-top: 4px; }
-.fp-row.models { color: #cfe6ff; }
+.fp-row:hover { background: var(--hover-wash); }
+.fp-row input { accent-color: var(--accent-blue); cursor: pointer; flex: none; }
+.fp-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.fp-label { flex: 1; min-width: 0; font-size: var(--t-body); }
+.fp-count { color: var(--text-dim); font-size: var(--t-label); font-variant-numeric: tabular-nums; }
+.fp-sep { height: 1px; background: var(--border); margin: var(--s3) 0; }
+.fp-row.danger { color: var(--color-amber); }
+.fp-row.allobj { color: var(--text-secondary); }
+.fp-hint { color: var(--text-dim); font-size: var(--t-label); line-height: 1.45; margin: 4px 0 var(--s2); }
+.fp-row.models { color: var(--text-primary); }
 .fp-num {
-  width: 64px;
-  padding: 3px 6px;
-  background: rgba(8, 14, 24, 0.9);
-  border: 1px solid #2b6cb0;
+  width: 68px;
+  padding: 5px 7px;
+  background: var(--bg-panel-3);
+  border: 1px solid var(--border-bright);
   border-radius: 4px;
-  color: #e8f1ff;
-  font: 12px ui-monospace, monospace;
+  color: var(--text-primary);
+  font: var(--t-body) var(--font-mono);
 }
+.fp-num:focus { outline: none; border-color: var(--accent-blue); }
+
+/* On a narrow frame the drawer takes the whole globe column rather than
+   leaving a 40px slot the planet cannot be seen through. */
+@media (max-width: 900px) {
+  .filter-panel { width: min(280px, 80%); }
+  .filter-tab.shifted { right: calc(min(280px, 80%) + var(--s5)); }
+  .reroute-card { width: min(320px, calc(100% - var(--s6))); }
+  .reroute-card.shifted { right: var(--s5); }
+}
+
+.map-key {
+  position: absolute;
+  left: var(--s5);
+  bottom: var(--s5);
+  z-index: 30;
+  max-width: 300px;
+  padding: 12px 14px;
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--border);
+  border-radius: var(--r1);
+  pointer-events: none;
+}
+.mk-title { font: 600 9px/1 var(--font-mono); letter-spacing: .2em; color: var(--text-dim); margin-bottom: 8px; }
+.mk-sec { font: 600 9.5px/1.4 var(--font-display); letter-spacing: .08em; color: var(--text-secondary); margin: 8px 0 5px; }
+.mk-row { display: flex; align-items: center; gap: 8px; font: 400 10.5px/1.6 var(--font-display); color: var(--text-primary); }
+.mk-swatch { width: 14px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+.mk-hatch { background: repeating-linear-gradient(45deg, rgba(160,160,170,.7), rgba(160,160,170,.7) 2px, transparent 2px, transparent 4px); border: 1px dashed #6b7280; }
+.mk-src { font: 400 9px/1.5 var(--font-mono); color: var(--text-dim); margin-top: 5px; }
+
+.follow-btn {
+  position: absolute;
+  top: 74px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 35;
+  padding: 11px 22px;
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--color-amber);
+  border-radius: 999px;
+  color: var(--color-amber);
+  font: 600 12px/1 var(--font-mono);
+  letter-spacing: .12em;
+  cursor: pointer;
+}
+.follow-btn:hover { background: rgba(224, 163, 46, 0.18); }
+.follow-btn.on { border-color: var(--color-red); color: var(--color-red); }
+
+.descent-hud {
+  position: absolute;
+  top: 126px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 35;
+  min-width: 260px;
+  padding: 10px 14px;
+  background: var(--glass-strong);
+  border: 1px solid var(--border);
+  border-radius: var(--r1);
+}
+.dh-row { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-secondary); padding: 2px 0; }
+.dh-row b { color: var(--text-primary); }
+.dh-bar { height: 3px; margin-top: 6px; background: var(--bg-panel-2); border-radius: 2px; overflow: hidden; }
+.dh-bar i { display: block; height: 100%; background: var(--color-amber); transition: width .12s linear; }
+.dh-controls { display: flex; gap: 6px; margin-top: 8px; justify-content: center; }
+.dh-controls button {
+  min-width: 34px; padding: 5px 8px;
+  background: var(--bg-panel-2); border: 1px solid var(--border);
+  border-radius: var(--r1); color: var(--text-secondary);
+  font: 600 10px/1 var(--font-mono); cursor: pointer;
+}
+.dh-controls button:hover { border-color: var(--border-bright); color: var(--text-primary); }
+.dh-controls button.on { border-color: var(--color-amber); color: var(--color-amber); }
+.dh-note { margin-top: 7px; font-size: 8.5px; color: var(--text-dim); text-align: center; }
+
+.approach-hud {
+  position: absolute;
+  top: 74px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 36;
+  min-width: 300px;
+  padding: 14px 18px;
+  text-align: center;
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--border-bright);
+  border-radius: var(--r2);
+}
+.ah-pair { font-size: 11px; color: var(--text-secondary); letter-spacing: .06em; }
+.ah-pair .a { color: #ff5f56; } .ah-pair .b { color: #ffb347; }
+.ah-range { font: 300 34px/1.1 var(--font-display); color: var(--text-primary); margin: 6px 0 2px; transition: color .2s; }
+.ah-range.close { color: var(--color-red); }
+.ah-sub { font-size: 10px; color: var(--text-dim); }
+.ah-verdict { margin-top: 9px; padding: 7px 0; border-radius: var(--r1); font: 700 13px/1 var(--font-mono); letter-spacing: .14em; }
+.ah-verdict.v-blocked { background: rgba(255,95,86,.16); color: var(--color-red); border: 1px solid var(--color-red); }
+.ah-verdict.v-complete { background: rgba(76,199,106,.14); color: var(--color-green); border: 1px solid var(--color-green); }
+.ah-verdict.v-partial { background: rgba(224,163,46,.14); color: var(--color-amber); border: 1px solid var(--color-amber); }
+.ah-verdict.v-unresolved { background: rgba(139,147,161,.12); color: var(--color-purple); border: 1.5px dashed var(--color-purple); }
+.ah-err { font-size: 11px; color: var(--color-amber); }
+.ah-x { position: absolute; top: 8px; right: 10px; background: none; border: 0; color: var(--text-dim); cursor: pointer; font-size: 13px; }
+.ah-x:hover { color: var(--text-primary); }
+
+.fp-gpu {
+  display: block; width: 100%; margin: 4px 0;
+  padding: 10px 0;
+  background: var(--accent-blue-dim);
+  border: 1px solid var(--accent-blue);
+  border-radius: var(--r1);
+  color: var(--text-primary);
+  font: 600 10px/1 var(--font-mono); letter-spacing: .08em;
+  cursor: pointer;
+}
+.fp-gpu:hover:not(:disabled) { background: var(--accent-blue-glow); }
+.fp-gpu:disabled { opacity: .6; cursor: wait; }
+.fp-gpu-out { font-size: 9.5px; line-height: 1.7; color: var(--text-secondary); padding: 6px 2px; }
+.fp-gpu-out b { color: var(--text-primary); }
+.fp-gpu-out .bad { color: var(--color-amber); }
+.fp-gpu-note { margin-top: 4px; font-size: 8.5px; color: var(--text-dim); }
 </style>

@@ -1,0 +1,102 @@
+{
+ "purpose": "measured operating envelope of the DINOv3 vision layer",
+ "validated_against": "GHS-POP (never seen by the model)",
+ "criterion": "Spearman rho(population density, BUILT fraction) > 0.25 within the band",
+ "bands": [
+  {
+   "lo": -90,
+   "hi": -45,
+   "n": 424,
+   "rho": 0.8678,
+   "trusted": true
+  },
+  {
+   "lo": -45,
+   "hi": -23,
+   "n": 4856,
+   "rho": 0.7308,
+   "trusted": true
+  },
+  {
+   "lo": -23,
+   "hi": 0,
+   "n": 10061,
+   "rho": 0.699,
+   "trusted": true
+  },
+  {
+   "lo": 0,
+   "hi": 23,
+   "n": 14621,
+   "rho": 0.8491,
+   "trusted": true
+  },
+  {
+   "lo": 23,
+   "hi": 45,
+   "n": 21183,
+   "rho": 0.7943,
+   "trusted": true
+  },
+  {
+   "lo": 45,
+   "hi": 55,
+   "n": 9962,
+   "rho": 0.774,
+   "trusted": true
+  },
+  {
+   "lo": 55,
+   "hi": 60,
+   "n": 4154,
+   "rho": 0.314,
+   "trusted": true
+  },
+  {
+   "lo": 60,
+   "hi": 66,
+   "n": 3719,
+   "rho": -0.039,
+   "trusted": false
+  },
+  {
+   "lo": 66,
+   "hi": 90,
+   "n": 2052,
+   "rho": 0.1873,
+   "trusted": false
+  }
+ ],
+ "trusted_bands": [
+  [
+   -90,
+   -45
+  ],
+  [
+   -45,
+   -23
+  ],
+  [
+   -23,
+   0
+  ],
+  [
+   0,
+   23
+  ],
+  [
+   23,
+   45
+  ],
+  [
+   45,
+   55
+  ],
+  [
+   55,
+   60
+  ]
+ ],
+ "population_share_inside_envelope": 0.9955,
+ "policy": "Outside the trusted bands the imagery-derived class is not used. FR-17b falls back to the ground datasets, and reports UNEVALUATED if those cannot characterise the cell either. The layer is never silently trusted where we have measured that it fails."
+}

@@ -56,21 +56,21 @@ function fmt(t) { try { return new Date(t).toLocaleString([], { month: 'short', 
 </script>
 
 <style scoped>
-.hp { display: flex; flex-direction: column; height: 100%; font: 12px/1.4 ui-monospace, monospace; }
+.hp { display: flex; flex-direction: column; height: 100%; font: 12px/1.4 var(--font-mono); }
 .hp-tabs { display: flex; gap: 6px; padding: 10px; flex-shrink: 0; }
 .hp-tabs button { flex: 1; padding: 8px; background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: 6px; color: var(--text-dim); font-size: 10px; font-weight: 700; letter-spacing: 0.06em; cursor: pointer; transition: all 0.15s; }
-.hp-tabs button.active { background: rgba(168,85,247,0.16); border-color: #a855f7; color: #d8b4fe; }
+.hp-tabs button.active { background: rgba(139, 147, 161, 0.16); border-color: var(--color-purple); color: #d8b4fe; }
 .hp-tabs button span { opacity: 0.6; margin-left: 3px; }
 .hp-list { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 8px 10px; display: flex; flex-direction: column; gap: 7px; }
 .hp-empty { color: var(--text-dim); font-size: 11px; line-height: 1.6; padding: 16px 6px; text-align: center; }
 .hp-item { display: flex; align-items: flex-start; gap: 6px; padding: 9px 10px; background: rgba(255,255,255,0.025); border: 1px solid var(--border); border-radius: 7px; cursor: pointer; transition: all 0.15s; }
-.hp-item:hover { background: rgba(168,85,247,0.08); border-color: rgba(168,85,247,0.4); }
+.hp-item:hover { background: rgba(139, 147, 161, 0.08); border-color: rgba(139, 147, 161, 0.4); }
 .hp-main { flex: 1; min-width: 0; }
 .hp-name { font-size: 12px; font-weight: 700; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.hp-rename { width: 100%; background: var(--bg-panel-3); border: 1px solid #a855f7; border-radius: 4px; padding: 3px 5px; color: var(--text-primary); font: 700 12px ui-monospace, monospace; outline: none; }
+.hp-rename { width: 100%; background: var(--bg-panel-3); border: 1px solid var(--color-purple); border-radius: 4px; padding: 3px 5px; color: var(--text-primary); font: 700 12px var(--font-mono); outline: none; }
 .hp-sum { font-size: 10px; color: var(--text-secondary); margin-top: 2px; }
-.hp-time { font-size: 9px; color: var(--text-dim); margin-top: 3px; }
+.hp-time { font-size: var(--t-micro); color: var(--text-dim); margin-top: 3px; }
 .hp-acts { display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; }
 .hp-acts button { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 12px; padding: 1px 3px; border-radius: 3px; }
-.hp-acts button:hover { color: #fff; background: rgba(255,255,255,0.08); }
+.hp-acts button:hover { color: var(--text-primary); background: var(--active-wash); }
 </style>

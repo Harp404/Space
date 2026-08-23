@@ -54,7 +54,7 @@
     </div>
 
     <!-- List -->
-    <div class="conj-list">
+    <div class="conj-list stagger">
       <div v-if="sorted.length === 0" class="empty-state">
         <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
           <circle cx="14" cy="14" r="12" stroke="var(--border-bright)" stroke-width="1.2"/>
@@ -67,7 +67,9 @@
         v-for="(conj, idx) in sorted"
         :key="conj.id"
         class="conj-row"
-        :class="'risk-' + getRiskClass(conj.risk_index)"
+        :class="['risk-' + getRiskClass(conj.risk_index), { actionable: conj.source !== 'CDM' }]"
+        :title="conj.source === 'CDM' ? 'Official CDM — read-only context' : 'Open the rulebook for this event'"
+        @click="conj.source !== 'CDM' && $emit('showConstraints', conj.id)"
       >
         <!-- Rank -->
         <div class="rank-badge" :class="'rank-' + getRiskClass(conj.risk_index)">
@@ -117,10 +119,23 @@
           <span class="tca-val mono">{{ formatTCA(conj.tca) }}</span>
         </div>
 
-        <!-- Status -->
+        <!-- Status + the four-state constraint signal -->
         <div class="status-col">
           <span class="status-badge" :class="'status-' + (conj.status || 'monitoring').toLowerCase()">
             {{ conj.status || 'MONITORING' }}
+          </span>
+          <button
+            v-if="conj.constraint"
+            class="csig"
+            :class="'csig-' + conj.constraint.signal.toLowerCase()"
+            :title="constraintTitle(conj)"
+            @click.stop="$emit('showConstraints', conj.id)"
+          >
+            {{ SIG_SHORT[conj.constraint.signal] }}
+            <span class="csig-pct">{{ conj.constraint.progress }}%</span>
+          </button>
+          <span v-if="conj.constraint && conj.constraint.deadline_in_ms != null" class="csig-clock" :title="'This event self-blocks when the rule deadline passes'">
+            ⏱ {{ fmtDur(conj.constraint.deadline_in_ms) }}
           </span>
         </div>
 
@@ -129,9 +144,14 @@
           <span v-if="conj.source === 'CDM'" class="live-tag" title="Live operational data — read only">LIVE</span>
           <template v-else>
           <button
+            class="btn-plan btn-cinema"
+            title="Replay the close approach on the globe — both objects, real orbits, range ticking down"
+            @click.stop="$emit('playApproach', conj.id)"
+          >⏵</button>
+          <button
             class="btn-plan"
             :disabled="planningId === conj.id"
-            @click="$emit('planManeuver', conj.id)"
+            @click.stop="$emit('planManeuver', conj.id)"
             title="Plan avoidance maneuver (screens vs whole catalogue)"
           >
             {{ planningId === conj.id ? '…' : 'PLAN' }}
@@ -139,9 +159,10 @@
           <template v-if="canManeuver(conj)">
           <button
             class="btn-approve"
+            :class="{ gated: conj.constraint && !conj.constraint.authorised }"
             :disabled="conj.status === 'APPROVED' || conj.status === 'RESOLVED'"
-            @click="$emit('requestManeuver', conj.id)"
-            title="Request consensus vote"
+            @click.stop="$emit('requestManeuver', conj.id)"
+            :title="voteTitle(conj)"
           >
             <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
               <path d="M1.5 5.5l2.5 2.5 4.5-5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
@@ -150,7 +171,7 @@
           </button>
           <button
             class="btn-emergency"
-            @click="$emit('emergencyOverride', conj.id)"
+            @click.stop="$emit('emergencyOverride', conj.id)"
             title="Emergency override — bypass consensus"
           >
             <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
@@ -188,7 +209,44 @@ const props = defineProps({
   planningId: { type: [Number, String], default: null },
 })
 
-const emit = defineEmits(['requestManeuver', 'emergencyOverride', 'planManeuver', 'clearPlan'])
+const emit = defineEmits(['requestManeuver', 'emergencyOverride', 'planManeuver', 'clearPlan', 'showConstraints', 'playApproach'])
+
+// The four-state completion signal, per event.
+const SIG_SHORT = {
+  COMPLETE: 'COMPLETE',
+  PARTIAL: 'PARTIAL',
+  BLOCKED: 'BLOCKED',
+  UNRESOLVED: 'UNKNOWN',
+}
+
+function constraintTitle(conj) {
+  const c = conj.constraint
+  if (!c) return ''
+  const bits = [`${c.signal} — ${c.progress}% of constraint work closed`]
+  if (c.blocking) bits.push(`${c.blocking} hard rule(s) violated`)
+  if (c.unevaluated) bits.push(`${c.unevaluated} rule(s) not evaluated`)
+  if (c.first) bits.push(`first: ${c.first}`)
+  bits.push('Click for the full rulebook.')
+  return bits.join(' · ')
+}
+
+function voteTitle(conj) {
+  const c = conj.constraint
+  if (c && !c.authorised) {
+    return c.signal === 'BLOCKED'
+      ? `Gate will refuse: a hard flight rule is violated (${c.first || '—'})`
+      : `Gate will withhold: ${c.unevaluated} rule(s) not yet evaluated (${c.first || '—'})`
+  }
+  return 'Request the operator poll'
+}
+
+function fmtDur(ms) {
+  if (ms == null) return '—'
+  const m = ms / 60000
+  if (m < 60) return `${Math.round(m)}m`
+  if (m < 1440) return `${(m / 60).toFixed(1)}h`
+  return `${(m / 1440).toFixed(1)}d`
+}
 
 // Only LIVE satellites can be commanded to maneuver — debris / rocket bodies cannot.
 function isManeuverable(name) { return !/DEB|R\/B|DEBRIS|COOLANT|WESTFORD|FRAG|PLAT/i.test(name || '') }
@@ -222,9 +280,18 @@ const sorted = computed(() => {
   }))
   const screened = [...props.conjunctions].map((c) => ({ ...c, source: 'SGP4' }))
   official.sort((a, b) => (b.probability || 0) - (a.probability || 0))
-  screened.sort((a, b) => (b.risk_index || 0) - (a.risk_index || 0))
-  // Show both layers: the highest-Pc official CDMs on top, then our own screening.
-  return [...official.slice(0, 8), ...screened.slice(0, 6)]
+  // Within our screening, events someone can actually ACT on lead. A
+  // debris-on-debris pass is real risk but offers no button except PLAN;
+  // sorting purely by risk buried every voteable event below the fold, so the
+  // full path — plan, vote, watch the gate arbitrate — was never on screen.
+  const voteable = (c) => (isManeuverable(c.sat1_name) || isManeuverable(c.sat2_name)) ? 1 : 0
+  screened.sort((a, b) => (voteable(b) - voteable(a)) || ((b.risk_index || 0) - (a.risk_index || 0)))
+  // ACTIONABLE EVENTS FIRST. The screened events are the ones with a
+  // constraint signal, a PLAN button and a VOTE button; the official CDMs are
+  // read-only context. Leading with eight read-only cards meant that in the
+  // 360px dock a user saw nothing but dead cards and concluded the whole
+  // panel did nothing — which, for the part of it they could see, was true.
+  return [...screened.slice(0, 8), ...official.slice(0, 6)]
 })
 
 function getRiskClass(ri) {
@@ -278,6 +345,22 @@ function formatTCA(tca) {
 </script>
 
 <style scoped>
+/* ---- four-state constraint signal ---- */
+.csig {
+  display: flex; align-items: center; gap: 5px;
+  font-family: var(--font-mono); font-size: var(--t-micro); font-weight: 700; letter-spacing: 0.12em;
+  line-height: 15px; padding: 0 6px; border-radius: 3px; cursor: pointer; background: none;
+  white-space: nowrap;
+}
+.csig-pct { opacity: 0.7; font-weight: 500; }
+.csig-complete   { color: var(--color-green);  border: 1px solid var(--color-green);  background: var(--color-green-dim); }
+.csig-partial    { color: var(--color-amber);  border: 1px solid var(--color-amber);  background: var(--color-amber-dim); }
+.csig-blocked    { color: var(--color-red);    border: 1px solid var(--color-red);    background: var(--color-red-dim); }
+.csig-unresolved { color: var(--color-purple); border: 1px solid var(--color-purple); background: var(--color-purple-dim); }
+.csig:hover { filter: brightness(1.35); }
+.csig-clock { font-family: var(--font-mono); font-size: var(--t-micro); letter-spacing: 0.08em; color: var(--color-amber); white-space: nowrap; }
+.btn-approve.gated { opacity: 0.5; border-style: dashed; }
+
 .panel {
   display: flex;
   flex-direction: column;
@@ -290,7 +373,8 @@ function formatTCA(tca) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 12px 8px;
+  gap: var(--s3);
+  padding: var(--s4) var(--s4) var(--s3);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
@@ -298,11 +382,11 @@ function formatTCA(tca) {
 .panel-title {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--s2);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--t-label);
   font-weight: 700;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.16em;
   color: var(--text-primary);
 }
 
@@ -313,9 +397,10 @@ function formatTCA(tca) {
 }
 
 .panel-meta {
-  font-size: 9px;
+  font-size: var(--t-micro);
   color: var(--text-dim);
-  letter-spacing: 0.08em;
+  letter-spacing: 0.12em;
+  white-space: nowrap;
 }
 
 /* Maneuver result */
@@ -340,8 +425,8 @@ function formatTCA(tca) {
 
 .result-label {
   font-family: var(--font-mono);
-  font-size: 8px;
-  letter-spacing: 0.12em;
+  font-size: var(--t-micro);
+  letter-spacing: 0.16em;
   color: var(--text-dim);
 }
 
@@ -357,9 +442,10 @@ function formatTCA(tca) {
 .result-denied .result-status { color: var(--color-red); }
 
 .result-time {
-  font-size: 9px;
+  font-size: var(--t-label);
   color: var(--text-dim);
   margin-left: auto;
+  font-variant-numeric: tabular-nums;
 }
 
 .vote-row {
@@ -371,12 +457,14 @@ function formatTCA(tca) {
 .vote-chip {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 2px 6px;
+  gap: 5px;
+  padding: 0 7px;
   border-radius: 3px;
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: var(--t-micro);
+  line-height: 17px;
   font-weight: 600;
+  letter-spacing: 0.08em;
 }
 
 .vote-yes {
@@ -393,15 +481,15 @@ function formatTCA(tca) {
 
 .vote-node {
   opacity: 0.7;
-  font-size: 8px;
 }
 
 /* List */
 .conj-list {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 4px 6px;
+  padding: var(--s3);
 }
 
 .empty-state {
@@ -417,44 +505,66 @@ function formatTCA(tca) {
   letter-spacing: 0.08em;
 }
 
+/* =====================================================================
+   A conjunction row.
+
+   This was SIX grid columns — rank, satellite pair, three metrics, TCA,
+   a status stack and three action buttons — inside a 360px dock panel.
+   At that width every column collapsed to its minimum, the satellite
+   names ellipsed to two characters, and the action buttons pushed out
+   past the clipped edge of the list.
+
+   It is now THREE stacked bands inside one card: who, the numbers, and
+   what you can do about it. Each band gets the full panel width, so
+   nothing has to fight for horizontal space.
+   ================================================================== */
+.conj-row.actionable { cursor: pointer; }
+.conj-row.actionable:hover { border-color: var(--accent-blue); background: rgba(255, 255, 255, 0.03); }
 .conj-row {
   display: grid;
-  grid-template-columns: 22px 1fr auto auto auto auto;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  grid-template-areas:
+    "rank pair    status"
+    "met  met     met"
+    "tca  act     act";
   align-items: center;
-  gap: 6px;
-  padding: 7px 6px;
-  margin-bottom: 3px;
-  border-radius: 4px;
-  border: 1px solid transparent;
-  background: rgba(255, 255, 255, 0.02);
-  transition: all 0.15s;
+  gap: var(--s2) var(--s2);
+  padding: var(--s3);
+  margin-bottom: var(--s2);
+  border-radius: var(--r1);
+  border: 1px solid var(--border);
+  background: var(--bg-panel-3);
+  transition: background var(--dur-1), border-color var(--dur-1);
   animation: fade-in-up 0.2s ease-out;
 }
 
 .conj-row:hover {
-  background: rgba(59, 130, 246, 0.05);
-  border-color: var(--border);
+  background: var(--bg-panel-2);
+  border-color: var(--border-bright);
 }
 
+/* The wash is the signal; the rank badge carries the same hue, so the
+   row reads as urgent from across a room without a second border. */
 .conj-row.risk-critical {
-  border-color: rgba(239, 68, 68, 0.2);
-  background: rgba(239, 68, 68, 0.04);
+  border-color: rgba(255, 95, 86, 0.28);
+  background: var(--color-red-dim);
 }
 
 .conj-row.risk-watch {
-  border-color: rgba(245, 158, 11, 0.15);
+  border-color: rgba(224, 163, 46, 0.22);
 }
 
 /* Rank badge */
 .rank-badge {
-  width: 20px;
-  height: 20px;
+  grid-area: rank;
+  width: 22px;
+  height: 22px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 3px;
+  border-radius: 4px;
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: var(--t-label);
   font-weight: 700;
   flex-shrink: 0;
 }
@@ -463,18 +573,20 @@ function formatTCA(tca) {
 .rank-watch { background: rgba(245, 158, 11, 0.15); color: var(--color-amber); }
 .rank-nominal { background: rgba(16, 185, 129, 0.1); color: var(--color-green); }
 
-/* Sat pair */
+/* --- band 1: who --- */
 .sat-pair {
+  grid-area: pair;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
   min-width: 0;
 }
 
 .sat-name {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--t-body);
   font-weight: 500;
+  line-height: 1.25;
   color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
@@ -485,36 +597,52 @@ function formatTCA(tca) {
   color: var(--text-dim);
   display: flex;
   align-items: center;
-  padding-left: 2px;
+  height: 8px;
 }
 
-/* Metrics */
+/* --- band 2: the numbers ---
+   A ruled strip across the full width. Four readings, evenly spaced,
+   each a label over a tabular figure — so the eye can scan DOWN a
+   column of rows and compare like with like. */
 .metrics {
-  display: flex;
-  gap: 8px;
-  flex-shrink: 0;
+  grid-area: met;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--s2);
+  padding-top: var(--s3);
+  border-top: 1px solid var(--border);
 }
 
-.metric {
+.metric,
+.tca-col {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 1px;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* Band 3, left: when it happens. Actions sit to its right. */
+.tca-col {
+  grid-area: tca;
+  align-items: flex-start;
 }
 
 .metric-label {
   font-family: var(--font-mono);
-  font-size: 7px;
-  letter-spacing: 0.1em;
+  font-size: var(--t-micro);
+  letter-spacing: 0.14em;
   color: var(--text-dim);
   text-transform: uppercase;
 }
 
 .metric-val {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--t-body);
   font-weight: 600;
+  line-height: 1;
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
 }
 
 .metric-val.critical { color: var(--color-red); }
@@ -522,41 +650,39 @@ function formatTCA(tca) {
 .metric-val.nominal { color: var(--color-green); }
 
 .risk-val {
-  font-size: 14px;
+  font-size: var(--t-lead);
   font-weight: 700;
 }
-
-.risk-val.critical {
-  color: var(--color-red);
-  text-shadow: 0 0 10px rgba(239, 68, 68, 0.5);
-}
-
-/* TCA */
-.tca-col {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 1px;
-  flex-shrink: 0;
-}
+/* No glow — the hue already carries it. */
+.risk-val.critical { color: var(--color-red); }
 
 .tca-val {
-  font-size: 9px;
+  font-family: var(--font-mono);
+  font-size: var(--t-body);
+  font-weight: 600;
+  line-height: 1;
   color: var(--text-secondary);
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
-/* Status badge */
+/* --- status, top-right of band 1 --- */
 .status-col {
+  grid-area: status;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
   flex-shrink: 0;
 }
 
 .status-badge {
   font-family: var(--font-mono);
-  font-size: 8px;
+  font-size: var(--t-micro);
   font-weight: 700;
-  letter-spacing: 0.08em;
-  padding: 2px 5px;
+  letter-spacing: 0.12em;
+  line-height: 15px;
+  padding: 0 6px;
   border-radius: 3px;
   white-space: nowrap;
 }
@@ -587,66 +713,82 @@ function formatTCA(tca) {
 }
 
 .status-official {
-  color: #22d3ee;
-  background: rgba(34, 211, 238, 0.12);
-  border: 1px solid rgba(34, 211, 238, 0.4);
+  color: var(--accent-blue);
+  background: rgba(201, 162, 39, 0.12);
+  border: 1px solid rgba(201, 162, 39, 0.4);
 }
 
-/* Source tag (CDM = official covariance data, vs our screening) */
+/* Source tag (CDM = official covariance data, vs our screening).
+   Was 7px — smaller than the product's own stated 10px floor, and the
+   distinction it draws (official vs our own screening) is the single most
+   important thing on the row to read correctly. */
 .source-tag {
   font-family: var(--font-mono);
-  font-size: 7px;
+  font-size: var(--t-micro);
   font-weight: 700;
-  letter-spacing: 0.1em;
-  margin-bottom: 1px;
+  letter-spacing: 0.14em;
+  margin-bottom: 2px;
 }
 
-.src-cdm { color: #22d3ee; }
-.src-screen { color: var(--text-dim); opacity: 0.6; }
+.src-cdm { color: var(--accent-blue); }
+.src-screen { color: var(--text-dim); }
 
 .live-tag {
   font-family: var(--font-mono);
-  font-size: 8px;
+  font-size: var(--t-micro);
   font-weight: 700;
-  letter-spacing: 0.08em;
-  color: #22d3ee;
-  background: rgba(34, 211, 238, 0.1);
-  border: 1px solid rgba(34, 211, 238, 0.3);
-  border-radius: 3px;
-  padding: 3px 6px;
-  animation: blink-dot 2s ease-in-out infinite;
+  letter-spacing: 0.12em;
+  line-height: 24px;
+  color: var(--accent-blue);
+  background: var(--accent-blue-dim);
+  border: 1px solid rgba(201, 162, 39, 0.3);
+  border-radius: 4px;
+  padding: 0 8px;
 }
 
-/* Actions */
+/* --- band 3, right: what you can do --- */
 .actions-col {
+  /* Actions are the point of the card — give them the weight of a toolbar,
+     not the weight of a tag. */
+  grid-area: act;
   display: flex;
-  gap: 3px;
-  flex-shrink: 0;
+  gap: var(--s2);
+  justify-content: flex-end;
+  align-items: center;
+  flex-wrap: wrap;
 }
 
-.btn-approve {
+.btn-approve,
+.btn-cinema { min-width: 34px; font-size: 13px; }
+.btn-plan {
   display: flex;
   align-items: center;
-  gap: 3px;
-  padding: 3px 7px;
-  background: var(--accent-blue-dim);
-  border: 1px solid rgba(59, 130, 246, 0.3);
-  border-radius: 3px;
-  color: var(--accent-blue);
-  font-size: 8px;
+  justify-content: center;
+  gap: 5px;
+  height: 34px;
+  padding: 0 16px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: var(--t-label);
   font-weight: 700;
-  letter-spacing: 0.08em;
-  transition: all 0.15s;
+  letter-spacing: 0.1em;
+  transition: background var(--dur-1), border-color var(--dur-1), color var(--dur-1);
   white-space: nowrap;
 }
 
-.btn-approve:hover:not(:disabled) {
-  background: rgba(59, 130, 246, 0.25);
-  border-color: var(--accent-blue);
-  box-shadow: 0 0 8px rgba(59, 130, 246, 0.3);
+.btn-approve {
+  background: var(--accent-blue-dim);
+  border: 1px solid rgba(201, 162, 39, 0.32);
+  color: var(--accent-blue);
 }
 
-.btn-approve:disabled {
+.btn-approve:hover:not(:disabled) {
+  background: rgba(201, 162, 39, 0.22);
+  border-color: var(--accent-blue);
+}
+
+.btn-approve:disabled,
+.btn-plan:disabled {
   opacity: 0.35;
   cursor: not-allowed;
 }
@@ -655,19 +797,18 @@ function formatTCA(tca) {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 34px;
   background: var(--color-red-dim);
-  border: 1px solid rgba(239, 68, 68, 0.3);
-  border-radius: 3px;
+  border: 1px solid rgba(255, 95, 86, 0.3);
+  border-radius: 4px;
   color: var(--color-red);
-  transition: all 0.15s;
+  transition: background var(--dur-1), border-color var(--dur-1);
 }
 
 .btn-emergency:hover {
-  background: rgba(239, 68, 68, 0.25);
+  background: rgba(255, 95, 86, 0.22);
   border-color: var(--color-red);
-  box-shadow: 0 0 8px rgba(239, 68, 68, 0.3);
 }
 
 .mono {
@@ -684,40 +825,42 @@ function formatTCA(tca) {
   flex-shrink: 0;
 }
 .plan-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 7px; }
-.plan-title { font-family: var(--font-mono); font-size: 10px; font-weight: 700; letter-spacing: 0.08em; color: var(--color-green); }
+.plan-title { font-family: var(--font-mono); font-size: var(--t-label); font-weight: 700; letter-spacing: 0.14em; color: var(--color-green); }
 .plan-close { color: var(--text-dim); font-size: 16px; line-height: 1; padding: 0 4px; }
 .plan-close:hover { color: var(--text-primary); }
 .plan-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 12px; }
 .plan-grid > div { display: flex; flex-direction: column; gap: 1px; }
-.pl-k { font-family: var(--font-mono); font-size: 7px; letter-spacing: 0.1em; color: var(--text-dim); }
-.pl-v { font-family: var(--font-mono); font-size: 11px; font-weight: 600; color: var(--text-primary); }
+.pl-k { font-family: var(--font-mono); font-size: var(--t-micro); letter-spacing: 0.14em; color: var(--text-dim); }
+.pl-v { font-family: var(--font-mono); font-size: var(--t-body); font-weight: 600; color: var(--text-primary); font-variant-numeric: tabular-nums; }
 .pl-v.ok { color: var(--color-green); }
 .pl-v.bad { color: var(--color-red); }
 .plan-maneuvers { margin-top: 8px; display: flex; flex-direction: column; gap: 5px; }
-.pm-row { display: flex; flex-direction: column; gap: 1px; border-left: 2px solid rgba(59,130,246,0.4); padding-left: 7px; }
-.pm-sat { font-family: var(--font-mono); font-size: 9px; font-weight: 700; color: var(--text-primary); letter-spacing: 0.04em; }
-.pm-act { font-size: 10.5px; color: var(--text-secondary); }
-.pm-act b { color: #60a5fa; font-weight: 700; }
-.pm-deb { font-size: 10px; color: var(--text-dim); font-style: italic; }
-.plan-legend { display: flex; gap: 14px; margin-top: 8px; font-family: var(--font-mono); font-size: 8px; }
-.lg-red { color: #ef4444; }
-.lg-blue { color: #3b82f6; }
+.pm-row { display: flex; flex-direction: column; gap: 1px; border-left: 2px solid rgba(201, 162, 39, 0.4); padding-left: 7px; }
+.pm-sat { font-family: var(--font-mono); font-size: var(--t-label); font-weight: 700; color: var(--text-primary); letter-spacing: 0.08em; }
+.pm-act { font-size: var(--t-body); line-height: 1.45; color: var(--text-secondary); }
+.pm-act b { color: var(--text-primary); font-weight: 700; }
+.pm-deb { font-size: var(--t-label); color: var(--text-dim); font-style: italic; }
+.plan-legend { display: flex; gap: var(--s4); margin-top: var(--s3); font-family: var(--font-mono); font-size: var(--t-micro); letter-spacing: 0.08em; }
+.lg-red { color: var(--color-red); }
+.lg-blue { color: var(--accent-blue); }
 
 .btn-plan {
-  display: flex;
-  align-items: center;
-  padding: 3px 6px;
-  background: rgba(16, 185, 129, 0.12);
-  border: 1px solid rgba(16, 185, 129, 0.35);
-  border-radius: 3px;
+  background: var(--color-green-dim);
+  border: 1px solid rgba(76, 199, 106, 0.35);
   color: var(--color-green);
-  font-family: var(--font-mono);
-  font-size: 8px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  transition: all 0.15s;
 }
-.btn-plan:hover:not(:disabled) { background: rgba(16, 185, 129, 0.25); box-shadow: 0 0 8px rgba(16, 185, 129, 0.3); }
-.btn-plan:disabled { opacity: 0.5; cursor: wait; }
-.deb-tag { font-family: var(--font-mono); font-size: 8px; font-weight: 700; letter-spacing: 0.06em; color: var(--text-dim); background: rgba(255,255,255,0.05); border: 1px solid var(--border); border-radius: 3px; padding: 3px 6px; white-space: nowrap; }
+.btn-plan:hover:not(:disabled) { background: rgba(76, 199, 106, 0.22); border-color: var(--color-green); }
+.deb-tag {
+  font-family: var(--font-mono);
+  font-size: var(--t-micro);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  line-height: 24px;
+  color: var(--text-dim);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 8px;
+  white-space: nowrap;
+}
 </style>

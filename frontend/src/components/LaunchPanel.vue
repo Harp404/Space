@@ -109,34 +109,36 @@ function clear() { result.value = null; emit('plan', null) }
 </script>
 
 <style scoped>
-.lp { padding: 12px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; font: 12px/1.4 ui-monospace, monospace; }
+.lp { padding: var(--s4); display: flex; flex-direction: column; gap: var(--s3); overflow-y: auto; font: var(--t-body)/1.5 var(--font-mono); }
 .lp-intro { font-size: 11px; color: var(--text-dim); line-height: 1.5; }
-.lp-sec { font-size: 10px; font-weight: 700; letter-spacing: 0.1em; color: #22d3ee; margin-top: 2px; }
+.lp-sec { font-size: 10px; font-weight: 700; letter-spacing: 0.1em; color: var(--accent-blue); margin-top: 2px; }
 .lp-sec-x { color: var(--text-dim); font-weight: 400; }
-.lp-row { display: flex; flex-direction: column; gap: 4px; font-size: 9px; letter-spacing: 0.08em; color: var(--text-dim); }
+.lp-row { display: flex; flex-direction: column; gap: 4px; font-size: var(--t-micro); letter-spacing: 0.08em; color: var(--text-dim); }
 .lp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.lp-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 9px; letter-spacing: 0.08em; color: var(--text-dim); }
+.lp-grid label { display: flex; flex-direction: column; gap: 4px; font-size: var(--t-micro); letter-spacing: 0.08em; color: var(--text-dim); }
 .lp-in { background: var(--bg-panel-3); border: 1px solid var(--border); border-radius: 5px; padding: 7px 9px; color: var(--text-primary); font-family: inherit; font-size: 12px; outline: none; }
-.lp-in:focus { border-color: #22d3ee; }
-.lp-go { padding: 11px; background: rgba(34,211,238,0.14); border: 1.5px solid #22d3ee; border-radius: 7px; color: #cdf3fb; font-weight: 700; letter-spacing: 0.08em; cursor: pointer; transition: all 0.15s; }
-.lp-go:hover:not(:disabled) { background: rgba(34,211,238,0.28); box-shadow: 0 0 14px rgba(34,211,238,0.4); }
+.lp-in:focus { border-color: var(--accent-blue); }
+/* was colour #cdf3fb — a cyan left over from an older palette, the only
+   place in the product still using it. */
+.lp-go { padding: 11px; background: var(--accent-blue-dim); border: 1px solid var(--accent-blue); border-radius: var(--r1); color: var(--accent-blue); font-weight: 700; letter-spacing: 0.12em; cursor: pointer; transition: background var(--dur-1); }
+.lp-go:hover:not(:disabled) { background: rgba(201, 162, 39, 0.24); }
 .lp-go:disabled { opacity: 0.7; cursor: wait; }
 .lp-res { display: flex; flex-direction: column; gap: 10px; }
 .lp-note { font-size: 11px; color: var(--color-amber); background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.3); border-radius: 5px; padding: 7px 9px; line-height: 1.45; }
 .lp-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 7px 12px; }
 .lp-stats > div { display: flex; flex-direction: column; gap: 1px; }
 .lp-stats .wide { grid-column: 1 / -1; }
-.lp-stats span { font-size: 8px; letter-spacing: 0.08em; color: var(--text-dim); }
+.lp-stats span { font-size: var(--t-micro); letter-spacing: 0.08em; color: var(--text-dim); }
 .lp-stats b { font-size: 12px; color: var(--text-primary); }
-.lp-stats b.ok { color: #34d399; }
-.lp-stats b.bad { color: #f87171; }
-.lp-legend { display: flex; gap: 14px; font-size: 9px; }
-.lp-legend .o { color: #f59e0b; } .lp-legend .c { color: #22d3ee; } .lp-legend .v { color: #fff; }
-.lp-best { background: rgba(52,211,153,0.08); border: 1px solid rgba(52,211,153,0.4); border-radius: 6px; padding: 8px 10px; font-size: 9px; letter-spacing: 0.08em; color: #6f8eae; }
-.lp-best b { display: block; margin-top: 3px; font-size: 13px; color: #34d399; letter-spacing: 0; }
-.lp-actions { display: flex; gap: 8px; }
-.lp-sim { flex: 1; padding: 10px; background: rgba(245,158,11,0.16); border: 1.5px solid #f59e0b; border-radius: 7px; color: #ffe6bd; font-weight: 700; letter-spacing: 0.06em; cursor: pointer; transition: all 0.15s; }
-.lp-sim:hover { background: rgba(245,158,11,0.3); box-shadow: 0 0 14px rgba(245,158,11,0.4); }
-.lp-clear { padding: 10px 14px; background: rgba(255,255,255,0.05); border: 1px solid var(--border); border-radius: 7px; color: var(--text-secondary); cursor: pointer; }
-.lp-clear:hover { background: rgba(255,255,255,0.1); }
+.lp-stats b.ok { color: var(--color-green); }
+.lp-stats b.bad { color: var(--color-red); }
+.lp-legend { display: flex; gap: 14px; font-size: var(--t-micro); }
+.lp-legend .o { color: var(--color-amber); } .lp-legend .c { color: var(--accent-blue); } .lp-legend .v { color: #fff; }
+.lp-best { background: var(--color-green-dim); border: 1px solid rgba(76, 199, 106, 0.35); border-radius: var(--r1); padding: var(--s2) var(--s3); font-size: var(--t-micro); letter-spacing: 0.12em; color: var(--text-dim); }
+.lp-best b { display: block; margin-top: 3px; font-size: 13px; color: var(--color-green); letter-spacing: 0; }
+.lp-actions { display: flex; gap: var(--s2); }
+.lp-sim { flex: 1; padding: 10px; background: var(--color-amber-dim); border: 1px solid var(--color-amber); border-radius: var(--r1); color: var(--color-amber); font-weight: 700; letter-spacing: 0.12em; cursor: pointer; transition: background var(--dur-1); }
+.lp-sim:hover { background: rgba(224, 163, 46, 0.26); }
+.lp-clear { padding: 10px 14px; background: var(--hover-wash); border: 1px solid var(--border); border-radius: var(--r1); color: var(--text-secondary); cursor: pointer; }
+.lp-clear:hover { background: var(--active-wash); color: var(--text-primary); }
 </style>

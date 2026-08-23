@@ -30,8 +30,20 @@ astromesh
 # ── Local TLE snapshot (we fetch live from CelesTrak; not bundled) ──
 frontend/public/tle/
 
-# ── Server-side catalogue cache (fetched from Space-Track, refreshed daily) ──
-dev/cache/
+# ── Server-side caches ──
+# Live-fetched data (regenerates on first run against Space-Track / NOAA):
+dev/cache/catalogue.3le
+dev/cache/cdms.json
+dev/cache/conjunctions.json
+dev/cache/conjunctions.stale.bak
+dev/cache/epochs.json
+dev/cache/satcat-rcs.json
+dev/cache/reentry-feed.json
+dev/cache/starlink/
+dev/cache/snapshot/
+# The trained/derived artefacts (dense-consequence, exposure, sheltering,
+# models/*.json) are IN the repo on purpose — they are the output of the GPU
+# runs and the demo depends on them.
 
 # ── Logs ──
 *.log
@@ -58,3 +70,23 @@ tmp/
 
 # demo video (large build artifact, don't commit)
 *.mp4
+
+# ── Local research scratch (never committed) ──
+research/
+
+# ── ML training data + venv (large, downloadable; scripts print their URLs) ──
+ml/data/
+ml/tiles/
+ml/.venv/
+ml/**/__pycache__/
+
+# ── TLA+ model checker artefacts ──
+formal/states/
+formal/*.out
+
+# ── Local-only save points (tools/snapshot.sh) ──
+.snapshots/
+
+# ── ML working data (large; scripts document their sources) ──
+ml/contradictions/
+ml/*.log

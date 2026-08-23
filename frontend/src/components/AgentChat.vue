@@ -2,6 +2,12 @@
   <teleport to="body">
     <!-- Edge trigger tab — the only thing visible when closed -->
     <button v-show="!open" class="ai-tab" @click="open = true" title="Ask Mission Control AI">
+      <span class="ai-tab-icon" aria-hidden="true">
+        <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+          <path d="M7 1.2l1.35 3.45L11.8 6l-3.45 1.35L7 10.8 5.65 7.35 2.2 6l3.45-1.35L7 1.2Z" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/>
+          <path d="M11.4 9.6l.5 1.3 1.3.5-1.3.5-.5 1.3-.5-1.3-1.3-.5 1.3-.5.5-1.3Z" fill="currentColor"/>
+        </svg>
+      </span>
       <span class="ai-tab-label">ASK&nbsp;AI</span>
     </button>
 
@@ -116,63 +122,62 @@ function render(t) { return marked.parse(String(t || '')) }
 
 <style scoped>
 /* Edge tab */
+/* A PILL, not a circle. "ASK AI" at 10px with 0.16em tracking is ~52px
+   wide; it was previously centred in a 40px round button, so the label
+   spilled symmetrically out of both sides of its own background. */
 .ai-tab {
   position: fixed;
-  right: 0;
-  top: 542px;
-  z-index: 1400;
-  width: 40px;
-  height: 132px;
+  right: var(--s5);
+  bottom: var(--s5);
+  z-index: var(--z-float);
+  height: 40px;
+  padding: 0 var(--s4);
   display: flex;
   align-items: center;
-  justify-content: center;
-  padding: 0;
-  background: linear-gradient(180deg, rgba(34, 211, 238, 0.18), rgba(34, 211, 238, 0.07));
-  border: 1px solid rgba(34, 211, 238, 0.45);
-  border-right: none;
-  border-radius: 8px 0 0 8px;
-  color: #22d3ee;
+  gap: var(--s2);
+  /* Nothing glows. A pulsing element claims attention it has not earned --
+     in this UI only the four completion states may do that. */
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--border);
+  border-radius: 99px;
+  box-shadow: var(--e2);
+  color: var(--text-secondary);
   cursor: pointer;
-  box-shadow: 0 0 18px rgba(34, 211, 238, 0.22), -2px 0 12px rgba(0,0,0,0.4);
-  transition: all 0.18s;
-  animation: tab-glow 2.4s ease-in-out infinite;
+  transition: color var(--dur-1), background var(--dur-1), border-color var(--dur-1);
 }
-.ai-tab:hover { background: rgba(34, 211, 238, 0.28); width: 46px; }
+.ai-tab:hover {
+  background: var(--bg-panel-2);
+  border-color: var(--border-bright);
+  color: var(--text-primary);
+}
+.ai-tab-icon { display: flex; }
 .ai-tab-label {
-  writing-mode: vertical-rl;
-  text-orientation: mixed;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--t-label);
   font-weight: 700;
   letter-spacing: 0.16em;
-}
-@keyframes tab-glow {
-  0%, 100% { box-shadow: 0 0 16px rgba(34,211,238,0.2), -2px 0 12px rgba(0,0,0,0.4); }
-  50% { box-shadow: 0 0 28px rgba(34,211,238,0.45), -2px 0 12px rgba(0,0,0,0.4); }
+  white-space: nowrap;
 }
 
-.ai-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 1450;
-  background: rgba(2, 6, 16, 0.45);
-  backdrop-filter: blur(1.5px);
-}
-
-/* Drawer */
+/* Drawer. Starts BELOW the header rather than covering it, so the link
+   status and threat count stay readable while the AI is open. */
 .ai-drawer {
   position: fixed;
-  top: 0;
+  top: var(--header-h);
   right: 0;
-  height: 100vh;
+  bottom: 0;
   width: 420px;
   max-width: 92vw;
-  z-index: 1500;
+  z-index: var(--z-drawer);
   display: flex;
   flex-direction: column;
-  background: linear-gradient(180deg, #0a1018 0%, #070b12 100%);
-  border-left: 1px solid rgba(34, 211, 238, 0.35);
-  box-shadow: -10px 0 40px rgba(0, 0, 0, 0.6);
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border-left: 1px solid var(--border-bright);
+  box-shadow: var(--e3);
 }
 
 .ai-head {
@@ -193,10 +198,10 @@ function render(t) { return marked.parse(String(t || '')) }
   letter-spacing: 0.1em;
   color: var(--text-primary);
 }
-.ai-dot { width: 7px; height: 7px; border-radius: 50%; background: #22d3ee; box-shadow: 0 0 8px #22d3ee; animation: blink-dot 1.6s infinite; }
+.ai-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent-blue); box-shadow: 0 0 8px var(--accent-blue); animation: blink-dot 1.6s infinite; }
 .ai-model {
-  font-size: 8px; color: #22d3ee; background: rgba(34,211,238,0.1);
-  border: 1px solid rgba(34,211,238,0.3); border-radius: 3px; padding: 2px 5px; letter-spacing: 0.04em;
+  font-size: 8px; color: var(--accent-blue); background: rgba(201, 162, 39, 0.1);
+  border: 1px solid rgba(201, 162, 39, 0.3); border-radius: 3px; padding: 2px 5px; letter-spacing: 0.04em;
 }
 .ai-close {
   display: flex; align-items: center; justify-content: center;
@@ -216,20 +221,20 @@ function render(t) { return marked.parse(String(t || '')) }
 }
 
 .ai-welcome { color: var(--text-dim); }
-.ai-welcome-title { font-family: var(--font-mono); font-size: 12px; font-weight: 700; color: #22d3ee; letter-spacing: 0.08em; margin-bottom: 6px; }
+.ai-welcome-title { font-family: var(--font-mono); font-size: 12px; font-weight: 700; color: var(--accent-blue); letter-spacing: 0.08em; margin-bottom: 6px; }
 .ai-welcome p { font-size: 12px; line-height: 1.6; margin-bottom: 14px; }
 .ai-suggests { display: flex; flex-direction: column; gap: 7px; }
 .ai-chip {
   text-align: left;
   font-size: 11.5px;
   color: var(--text-secondary);
-  background: rgba(34, 211, 238, 0.06);
-  border: 1px solid rgba(34, 211, 238, 0.22);
+  background: rgba(201, 162, 39, 0.06);
+  border: 1px solid rgba(201, 162, 39, 0.22);
   border-radius: 7px;
   padding: 9px 11px;
   transition: all 0.15s;
 }
-.ai-chip:hover { background: rgba(34, 211, 238, 0.15); border-color: rgba(34, 211, 238, 0.5); color: var(--text-primary); }
+.ai-chip:hover { background: rgba(201, 162, 39, 0.15); border-color: rgba(201, 162, 39, 0.5); color: var(--text-primary); }
 
 .ai-msg { display: flex; gap: 9px; align-items: flex-start; }
 .ai-who {
@@ -237,23 +242,23 @@ function render(t) { return marked.parse(String(t || '')) }
   padding: 3px 5px; border-radius: 3px; flex-shrink: 0; margin-top: 2px;
 }
 .msg-user .ai-who { color: var(--accent-blue); background: var(--accent-blue-dim); }
-.msg-assistant .ai-who { color: #22d3ee; background: rgba(34, 211, 238, 0.12); }
+.msg-assistant .ai-who { color: var(--accent-blue); background: rgba(201, 162, 39, 0.12); }
 .ai-text { font-size: 13px; line-height: 1.6; color: var(--text-secondary); word-break: break-word; }
 .msg-user .ai-text { color: var(--text-primary); }
 .ai-text :deep(b), .ai-text :deep(strong) { color: var(--text-primary); font-weight: 700; }
-.ai-text :deep(code) { font-family: var(--font-mono); font-size: 11px; background: rgba(255,255,255,0.06); padding: 1px 4px; border-radius: 3px; color: #22d3ee; }
+.ai-text :deep(code) { font-family: var(--font-mono); font-size: 11px; background: rgba(255,255,255,0.06); padding: 1px 4px; border-radius: 3px; color: var(--accent-blue); }
 .ai-text :deep(p) { margin: 0 0 6px; }
 .ai-text :deep(ul), .ai-text :deep(ol) { margin: 4px 0; padding-left: 18px; }
 .ai-text :deep(li) { margin: 2px 0; }
-.ai-text :deep(h1), .ai-text :deep(h2), .ai-text :deep(h3) { font-size: 12px; color: #22d3ee; margin: 8px 0 4px; letter-spacing: 0.03em; }
+.ai-text :deep(h1), .ai-text :deep(h2), .ai-text :deep(h3) { font-size: 12px; color: var(--accent-blue); margin: 8px 0 4px; letter-spacing: 0.03em; }
 .ai-text :deep(table) { border-collapse: collapse; width: 100%; margin: 6px 0; font-size: 10.5px; }
 .ai-text :deep(th), .ai-text :deep(td) { border: 1px solid var(--border); padding: 4px 7px; text-align: left; }
-.ai-text :deep(th) { background: rgba(34,211,238,0.12); color: #22d3ee; font-weight: 700; }
+.ai-text :deep(th) { background: rgba(201, 162, 39, 0.12); color: var(--accent-blue); font-weight: 700; }
 .ai-text :deep(tr:nth-child(even) td) { background: rgba(255,255,255,0.02); }
-.ai-text :deep(a) { color: #60a5fa; }
+.ai-text :deep(a) { color: var(--text-secondary); }
 
 .typing { display: flex; gap: 4px; padding: 5px 0; }
-.typing span { width: 6px; height: 6px; border-radius: 50%; background: #22d3ee; opacity: 0.5; animation: typing-bounce 1s infinite ease-in-out; }
+.typing span { width: 6px; height: 6px; border-radius: 50%; background: var(--accent-blue); opacity: 0.5; animation: typing-bounce 1s infinite ease-in-out; }
 .typing span:nth-child(2) { animation-delay: 0.15s; }
 .typing span:nth-child(3) { animation-delay: 0.3s; }
 @keyframes typing-bounce { 0%, 60%, 100% { transform: translateY(0); opacity: 0.4; } 30% { transform: translateY(-5px); opacity: 1; } }
@@ -263,13 +268,13 @@ function render(t) { return marked.parse(String(t || '')) }
   flex: 1; background: var(--bg-panel-3); border: 1px solid var(--border); border-radius: 7px;
   padding: 11px 13px; font-size: 13px; color: var(--text-primary); font-family: inherit; outline: none; transition: border-color 0.15s;
 }
-.ai-input:focus { border-color: #22d3ee; }
+.ai-input:focus { border-color: var(--accent-blue); }
 .ai-input::placeholder { color: var(--text-dim); }
 .ai-send {
   display: flex; align-items: center; justify-content: center; width: 42px;
-  background: rgba(34, 211, 238, 0.14); border: 1px solid rgba(34, 211, 238, 0.4); border-radius: 7px; color: #22d3ee; transition: all 0.15s;
+  background: rgba(201, 162, 39, 0.14); border: 1px solid rgba(201, 162, 39, 0.4); border-radius: 7px; color: var(--accent-blue); transition: all 0.15s;
 }
-.ai-send:hover:not(:disabled) { background: rgba(34, 211, 238, 0.28); box-shadow: 0 0 10px rgba(34, 211, 238, 0.35); }
+.ai-send:hover:not(:disabled) { background: rgba(201, 162, 39, 0.28); box-shadow: 0 0 10px rgba(201, 162, 39, 0.35); }
 .ai-send:disabled { opacity: 0.35; cursor: not-allowed; }
 
 /* Transitions */

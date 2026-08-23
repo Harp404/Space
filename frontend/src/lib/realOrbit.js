@@ -3,6 +3,7 @@
 import * as satellite from 'satellite.js'
 
 const satrecMap = new Map()   // noradId(number) → satrec
+const nameByNorad = new Map()  // noradId → display name, for the GPU screen's results
 
 // localStorage TLE cache — TLEs only update a few times/day, so reuse for 6 h.
 // This stops repeated page reloads from hammering CelesTrak (which gets us 403-blocked).
@@ -101,6 +102,7 @@ export async function loadByNorad(noradId, idOffset = 100000) {
     const rec = satellite.twoline2satrec(tle.line1, tle.line2)
     if (!rec || rec.error) return null
     satrecMap.set(noradId, rec)
+    if (tle.name) nameByNorad.set(noradId, tle.name)
     const n = parseFloat(tle.line2.substring(52, 63))
     const a = Math.cbrt(398600.4418 / Math.pow((n * 2 * Math.PI) / 86400, 2))
     return {
@@ -302,4 +304,31 @@ export async function loadCatalogue(groups) {
     }
   }
   return out
+}
+
+
+// ---------------------------------------------------------------------------
+// Bulk state export for the GPU screening pass.
+//
+// One propagation per object at a single epoch, packed flat for upload to a
+// compute shader: [px py pz vx vy vz] per object, km and km/s, ECI. The GPU
+// then screens every PAIR by linear closest-approach — the O(N^2) part that
+// has no business running one JavaScript pair at a time.
+// ---------------------------------------------------------------------------
+export function exportStatesEci(jsDate, { limit = Infinity } = {}) {
+  const ids = []
+  const names = []
+  const out = []
+  for (const [norad, rec] of satrecMap) {
+    if (ids.length >= limit) break
+    let pv
+    try { pv = satellite.propagate(rec, jsDate) } catch { continue }
+    if (!pv || !pv.position || !pv.velocity) continue
+    const { position: r, velocity: v } = pv
+    if (![r.x, r.y, r.z, v.x, v.y, v.z].every(Number.isFinite)) continue
+    ids.push(norad)
+    names.push(nameByNorad.get(norad) || String(norad))
+    out.push(r.x, r.y, r.z, v.x, v.y, v.z)
+  }
+  return { ids, names, states: new Float32Array(out) }
 }

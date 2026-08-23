@@ -5,15 +5,15 @@
       <div class="logo-mark">
         <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
           <!-- Earth core -->
-          <circle cx="16" cy="16" r="6" fill="#1e3a5f" stroke="#3b82f6" stroke-width="1"/>
+          <circle cx="16" cy="16" r="6" fill="var(--bg-panel-2)" stroke="var(--accent-blue)" stroke-width="1"/>
           <!-- Orbital ring 1 -->
-          <ellipse cx="16" cy="16" rx="13" ry="5" stroke="#3b82f6" stroke-width="1.2" fill="none" opacity="0.7"
+          <ellipse cx="16" cy="16" rx="13" ry="5" stroke="var(--accent-blue)" stroke-width="1.2" fill="none" opacity="0.7"
             transform="rotate(-20, 16, 16)"/>
           <!-- Orbital ring 2 -->
           <ellipse cx="16" cy="16" rx="13" ry="5" stroke="#8b5cf6" stroke-width="0.8" fill="none" opacity="0.5"
             transform="rotate(60, 16, 16)"/>
           <!-- Satellite dot -->
-          <circle cx="27.2" cy="12.5" r="1.8" fill="#ef4444">
+          <circle cx="27.2" cy="12.5" r="1.8" fill="var(--color-red)">
             <animateTransform attributeName="transform" type="rotate"
               from="0 16 16" to="360 16 16" dur="8s" repeatCount="indefinite"/>
           </circle>
@@ -30,59 +30,71 @@
       </div>
     </div>
 
-    <!-- Status widgets -->
+    <!-- ===================== READOUTS =====================
+         Each reading is a LABEL STACKED OVER A VALUE, separated from its
+         neighbours by a hairline rule. Previously these were inline
+         label-value pairs with a 4px gap — a smaller gap BETWEEN readings
+         than inside them, which made the whole bar read as one run-on
+         string. Stacking the pair and ruling between them means the eye
+         parses six readings instead of one sentence. -->
     <div class="status-bar">
       <!-- UTC Clock -->
-      <div class="widget clock-widget">
-        <span class="widget-label">UTC</span>
-        <span class="widget-value mono">{{ utcTime }}</span>
+      <div class="readout r-clock">
+        <span class="ro-label">UTC</span>
+        <span class="ro-value mono">{{ utcTime }}</span>
       </div>
 
       <!-- Link status -->
-      <div class="widget link-widget" :class="wsConnected ? 'link-ok' : 'link-err'">
-        <span class="link-dot"></span>
-        <span class="widget-label">LINK</span>
-        <span class="widget-value">{{ wsConnected ? 'NOMINAL' : 'OFFLINE' }}</span>
+      <div class="readout" :class="wsConnected ? 'link-ok' : 'link-err'">
+        <span class="ro-label">Link</span>
+        <span class="ro-value ro-lamped">
+          <span class="link-dot"></span>{{ wsConnected ? 'NOMINAL' : 'OFFLINE' }}
+        </span>
       </div>
 
       <!-- Active threats -->
-      <div class="widget threat-widget" :class="{ 'has-threats': activeConjunctions > 0 }">
-        <span class="widget-label">ACTIVE THREATS</span>
-        <span class="widget-value threat-count">{{ activeConjunctions }}</span>
+      <div class="readout" :class="{ 'has-threats': activeConjunctions > 0 }">
+        <span class="ro-label">Active threats</span>
+        <span class="ro-value threat-count mono">{{ activeConjunctions }}</span>
       </div>
 
       <!-- Node count -->
-      <div class="widget">
-        <span class="widget-label">NODES</span>
-        <span class="widget-value mono">{{ nodeCount }}</span>
+      <div class="readout r-nodes">
+        <span class="ro-label">Nodes</span>
+        <span class="ro-value mono">{{ nodeCount }}</span>
       </div>
 
       <!-- Space weather badge -->
-      <div class="widget weather-widget">
-        <span class="widget-label">SPACE WEATHER</span>
-        <span class="weather-badge" :class="weatherClass">{{ weatherLabel }}</span>
+      <div class="readout r-weather">
+        <span class="ro-label">Space weather</span>
+        <span class="ro-value">
+          <span class="weather-badge" :class="weatherClass">{{ weatherLabel }}</span>
+        </span>
       </div>
 
-      <!-- Agent status -->
-      <div class="widget agent-widget" :class="agentEnabled ? 'agent-active' : 'agent-standby'">
-        <span class="agent-icon">
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-            <circle cx="7" cy="5" r="3" stroke="currentColor" stroke-width="1.2"/>
-            <path d="M1 13c0-3.314 2.686-6 6-6s6 2.686 6 6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
-            <circle cx="7" cy="5" r="1.2" fill="currentColor"/>
-          </svg>
+      <!-- Agent status. The lamp is a LAID-OUT sibling of the text, not an
+           absolutely-positioned dot on top of it — which is what used to
+           put a green circle through the word STANDBY. -->
+      <div class="readout r-agent" :class="agentEnabled ? 'agent-active' : 'agent-standby'">
+        <span class="ro-label">Autonomy</span>
+        <span class="ro-value ro-lamped">
+          <span class="agent-icon">
+            <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
+              <circle cx="7" cy="5" r="3" stroke="currentColor" stroke-width="1.2"/>
+              <path d="M1 13c0-3.314 2.686-6 6-6s6 2.686 6 6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+              <circle cx="7" cy="5" r="1.2" fill="currentColor"/>
+            </svg>
+          </span>
+          {{ agentEnabled ? 'ACTIVE' : 'STANDBY' }}
         </span>
-        <span class="widget-label">AGENT</span>
-        <span class="widget-value">{{ agentEnabled ? 'ACTIVE' : 'STANDBY' }}</span>
-        <span v-if="agentEnabled" class="agent-pulse-ring"></span>
       </div>
 
       <!-- Fullscreen -->
-      <button class="fullscreen-btn" @click="toggleFullscreen" title="Toggle fullscreen">
-        <svg v-if="!isFullscreen" width="16" height="16" viewBox="0 0 16 16" fill="none">
+      <button class="fullscreen-btn" @click="toggleFullscreen" :title="isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'" :aria-label="isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'">
+        <svg v-if="!isFullscreen" width="15" height="15" viewBox="0 0 16 16" fill="none">
           <path d="M1 1h4M1 1v4M15 1h-4M15 1v4M1 15h4M1 15v-4M15 15h-4M15 15v-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
         </svg>
-        <svg v-else width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <svg v-else width="15" height="15" viewBox="0 0 16 16" fill="none">
           <path d="M5 1v4H1M11 1v4h4M5 15v-4H1M11 15v-4h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
         </svg>
       </button>
@@ -157,30 +169,16 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 16px;
-  background: linear-gradient(180deg, rgba(14, 20, 32, 0.98) 0%, rgba(8, 11, 18, 0.95) 100%);
-  border-bottom: 1px solid var(--border-bright);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  padding: 0 var(--s5);
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border-bottom: 1px solid var(--border);
   position: relative;
-  z-index: 100;
-  gap: 16px;
+  z-index: var(--z-header);
+  gap: var(--s4);
 }
 
-/* Subtle scan line effect */
-.header::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(90deg,
-    transparent 0%,
-    rgba(59, 130, 246, 0.03) 30%,
-    rgba(59, 130, 246, 0.06) 50%,
-    rgba(59, 130, 246, 0.03) 70%,
-    transparent 100%
-  );
-  pointer-events: none;
-}
 
 .brand {
   display: flex;
@@ -190,83 +188,90 @@ onUnmounted(() => {
 }
 
 .logo-mark {
-  filter: drop-shadow(0 0 8px rgba(59, 130, 246, 0.5));
+  display: flex;
+  /* No glow. The mark is a mark, not a light source. */
 }
 
 .brand-text {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 4px;
 }
 
 .brand-name {
   font-family: var(--font-display);
-  font-size: 16px;
-  font-weight: 700;
-  letter-spacing: 0.15em;
-  color: #fff;
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  color: var(--text-primary);
   line-height: 1;
-  background: linear-gradient(135deg, #e2e8f0 0%, #93c5fd 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
 }
 
 .brand-sub {
   font-family: var(--font-mono);
-  font-size: 8px;
-  letter-spacing: 0.2em;
+  font-size: var(--t-micro);
+  letter-spacing: 0.18em;
   color: var(--text-dim);
   line-height: 1;
 }
 
 .status-bar {
   display: flex;
-  align-items: center;
-  gap: 4px;
+  align-items: stretch;
+  gap: 0;
   flex: 1;
+  min-width: 0;
   justify-content: flex-end;
-  overflow: hidden;
+  height: 30px;
+  align-self: center;
 }
 
-.widget {
+/* ---------------------------------------------------------------------
+   A readout: micro label over a value, ruled off from its neighbour.
+   ------------------------------------------------------------------- */
+.readout {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid var(--border);
-  border-radius: 4px;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  padding: 0 var(--s4);
   white-space: nowrap;
   position: relative;
-  overflow: hidden;
+  border-left: 1px solid var(--border);
+  flex-shrink: 0;
 }
+.readout:first-child { border-left: 0; }
 
-.widget-label {
+.ro-label {
   font-family: var(--font-mono);
-  font-size: 8px;
-  letter-spacing: 0.12em;
+  font-size: var(--t-micro);
+  line-height: 1;
+  letter-spacing: 0.16em;
   color: var(--text-dim);
   text-transform: uppercase;
 }
 
-.widget-value {
+.ro-value {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 12px;
+  line-height: 1;
   font-weight: 600;
   color: var(--text-primary);
+  letter-spacing: 0.04em;
 }
 
-.widget-value.mono {
-  font-size: 12px;
-  color: var(--accent-blue);
+/* A value with a lamp or glyph in front of it. */
+.ro-lamped {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
-.clock-widget .widget-value {
-  font-size: 11px;
-  color: #93c5fd;
-  letter-spacing: 0.05em;
+.r-clock .ro-value {
+  color: var(--text-secondary);
+  font-weight: 400;
 }
+.r-nodes .ro-value { color: var(--accent-blue); }
 
 /* Link status */
 .link-dot {
@@ -278,51 +283,42 @@ onUnmounted(() => {
 
 .link-ok .link-dot {
   background: var(--color-green);
-  box-shadow: 0 0 6px var(--color-green);
   animation: blink-dot 2s ease-in-out infinite;
 }
 
 .link-err .link-dot {
   background: var(--color-red);
-  box-shadow: 0 0 6px var(--color-red);
 }
 
-.link-ok .widget-value {
-  color: var(--color-green);
-}
+.link-ok .ro-value { color: var(--color-green); }
+.link-err .ro-value { color: var(--color-red); }
 
-.link-err .widget-value {
-  color: var(--color-red);
-}
-
-/* Threats */
-.has-threats {
-  border-color: rgba(239, 68, 68, 0.4);
-  background: rgba(239, 68, 68, 0.08);
-  animation: threat-pulse 2s ease-in-out infinite;
-}
-
-@keyframes threat-pulse {
-  0%, 100% { border-color: rgba(239, 68, 68, 0.3); }
-  50% { border-color: rgba(239, 68, 68, 0.7); box-shadow: 0 0 10px rgba(239, 68, 68, 0.2); }
-}
-
+/* Threats. A count of zero is not news, so it stays neutral; the readout
+   only takes on the red wash once there is something in it. */
 .threat-count {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
-  font-family: var(--font-mono);
-  color: var(--color-red) !important;
-  min-width: 20px;
-  text-align: center;
+  letter-spacing: 0;
 }
+.has-threats .threat-count { color: var(--color-red); }
+.has-threats::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--color-red-dim);
+  pointer-events: none;
+}
+.has-threats > * { position: relative; }
 
 /* Weather */
 .weather-badge {
+  display: inline-block;
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: var(--t-micro);
   font-weight: 700;
-  letter-spacing: 0.1em;
-  padding: 2px 6px;
+  line-height: 12px;
+  letter-spacing: 0.12em;
+  padding: 0 6px;
   border-radius: 3px;
 }
 
@@ -345,74 +341,58 @@ onUnmounted(() => {
 }
 
 /* Agent */
-.agent-widget {
-  position: relative;
-  overflow: visible;
-}
-
 .agent-icon {
   display: flex;
   align-items: center;
   flex-shrink: 0;
 }
 
-.agent-active {
-  border-color: rgba(16, 185, 129, 0.4);
-  background: rgba(16, 185, 129, 0.08);
-}
-
 .agent-active .agent-icon,
-.agent-active .widget-value {
-  color: var(--color-green);
-}
-
-.agent-standby {
-  border-color: rgba(245, 158, 11, 0.3);
-}
+.agent-active .ro-value { color: var(--color-green); }
 
 .agent-standby .agent-icon,
-.agent-standby .widget-value {
-  color: var(--color-amber);
-}
-
-.agent-pulse-ring {
-  position: absolute;
-  top: 50%;
-  right: 8px;
-  width: 6px;
-  height: 6px;
-  margin-top: -3px;
-  border-radius: 50%;
-  background: var(--color-green);
-}
-
-.agent-pulse-ring::after {
-  content: '';
-  position: absolute;
-  inset: -3px;
-  border-radius: 50%;
-  border: 1px solid var(--color-green);
-  animation: pulse-ring 1.5s ease-out infinite;
-}
+.agent-standby .ro-value { color: var(--text-secondary); }
 
 /* Fullscreen */
 .fullscreen-btn {
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
+  margin-left: var(--s3);
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(255, 255, 255, 0.03);
+  background: transparent;
   border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text-secondary);
-  transition: all 0.15s;
+  border-radius: var(--r1);
+  color: var(--text-dim);
+  transition: color var(--dur-1), border-color var(--dur-1), background var(--dur-1);
   flex-shrink: 0;
+  align-self: center;
 }
 
 .fullscreen-btn:hover {
-  background: var(--accent-blue-dim);
-  border-color: var(--accent-blue);
-  color: var(--accent-blue);
+  background: var(--hover-wash);
+  border-color: var(--border-bright);
+  color: var(--text-primary);
+}
+
+/* ---------------------------------------------------------------------
+   Narrow frames. Readouts are dropped in reverse order of importance
+   rather than being clipped mid-word by an overflow:hidden, which is what
+   used to leave half a value hanging off the edge of the bar.
+   ------------------------------------------------------------------- */
+@media (max-width: 1380px) {
+  .r-weather { display: none; }
+}
+@media (max-width: 1180px) {
+  .r-nodes { display: none; }
+  .readout { padding: 0 var(--s3); }
+}
+@media (max-width: 1000px) {
+  .r-clock { display: none; }
+  .brand-sub { display: none; }
+}
+@media (max-width: 820px) {
+  .r-agent { display: none; }
 }
 </style>

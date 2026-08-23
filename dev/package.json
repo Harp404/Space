@@ -1,0 +1,18 @@
+{
+  "name": "astromesh-dev",
+  "private": true,
+  "version": "2.0.0",
+  "description": "AstroMesh gateway and constraint engine. The ENGINE ITSELF has zero runtime dependencies — everything listed here is tooling for the gateway and the test suite.",
+  "scripts": {
+    "test": "node --test constraints/*.test.js",
+    "test:properties": "node --test constraints/engine.properties.test.js",
+    "gateway": "node mock-gateway.js"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "fast-check": "^3.23.2"
+  },
+  "engines": { "node": ">=20" }
+}

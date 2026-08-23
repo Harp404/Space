@@ -146,14 +146,14 @@ function formatTs(ts) {
   align-items: center;
   gap: 6px;
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: var(--t-micro);
   font-weight: 700;
   letter-spacing: 0.14em;
   color: var(--text-secondary);
 }
 
 .feed-count {
-  font-size: 9px;
+  font-size: var(--t-micro);
   color: var(--text-dim);
   letter-spacing: 0.08em;
 }
@@ -219,7 +219,7 @@ function formatTs(ts) {
 
 .entry-leader {
   border-left-color: var(--accent-blue);
-  background: rgba(59, 130, 246, 0.04);
+  background: rgba(201, 162, 39, 0.04);
 }
 
 .entry-default {
@@ -256,7 +256,7 @@ function formatTs(ts) {
 
 /* Timestamp */
 .entry-ts {
-  font-size: 9px;
+  font-size: var(--t-micro);
   color: var(--text-dim);
   flex-shrink: 0;
   letter-spacing: 0.04em;
@@ -265,15 +265,15 @@ function formatTs(ts) {
 /* Message */
 .entry-msg {
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: var(--t-micro);
   color: var(--text-secondary);
   line-height: 1.5;
   word-break: break-word;
 }
 
-.entry-alert .entry-msg { color: #fca5a5; }
-.entry-approved .entry-msg { color: #6ee7b7; }
-.entry-leader .entry-msg { color: #93c5fd; }
+.entry-alert .entry-msg { color: var(--color-red); }
+.entry-approved .entry-msg { color: var(--color-green); }
+.entry-leader .entry-msg { color: var(--text-secondary); }
 
 .mono {
   font-family: var(--font-mono);

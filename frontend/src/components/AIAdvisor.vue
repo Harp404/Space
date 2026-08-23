@@ -198,7 +198,7 @@ function formatTs(ts) {
   align-items: center;
   gap: 6px;
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: var(--t-micro);
   font-weight: 700;
   letter-spacing: 0.12em;
   color: var(--text-secondary);
@@ -208,7 +208,7 @@ function formatTs(ts) {
   padding: 3px 8px;
   border-radius: 3px;
   font-family: var(--font-mono);
-  font-size: 8px;
+  font-size: var(--t-micro);
   font-weight: 700;
   letter-spacing: 0.1em;
   transition: all 0.15s;
@@ -259,7 +259,7 @@ function formatTs(ts) {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 9px;
+  font-size: var(--t-micro);
   color: var(--text-dim);
   letter-spacing: 0.06em;
 }
@@ -320,7 +320,7 @@ function formatTs(ts) {
 
 .status-text {
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: var(--t-micro);
   font-weight: 700;
   letter-spacing: 0.1em;
 }
@@ -329,7 +329,7 @@ function formatTs(ts) {
 .status-standby .status-text { color: var(--color-amber); }
 
 .scan-countdown {
-  font-size: 9px;
+  font-size: var(--t-micro);
   color: var(--text-dim);
   letter-spacing: 0.08em;
 }
@@ -371,7 +371,7 @@ function formatTs(ts) {
 
 .tstat-label {
   font-family: var(--font-mono);
-  font-size: 7px;
+  font-size: var(--t-micro);
   letter-spacing: 0.1em;
   color: var(--text-dim);
 }
@@ -379,7 +379,7 @@ function formatTs(ts) {
 /* Section labels */
 .section-label {
   font-family: var(--font-mono);
-  font-size: 8px;
+  font-size: var(--t-micro);
   font-weight: 700;
   letter-spacing: 0.14em;
   color: var(--text-dim);
@@ -395,7 +395,7 @@ function formatTs(ts) {
 
 .queue-empty {
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: var(--t-micro);
   color: var(--text-dim);
   text-align: center;
   padding: 6px;
@@ -425,7 +425,7 @@ function formatTs(ts) {
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 9px;
+  font-size: var(--t-micro);
   color: var(--text-secondary);
   font-family: var(--font-mono);
   overflow: hidden;
@@ -443,7 +443,7 @@ function formatTs(ts) {
 }
 
 .queue-prob {
-  font-size: 8px;
+  font-size: var(--t-micro);
   color: var(--text-dim);
   white-space: nowrap;
   flex-shrink: 0;
@@ -460,7 +460,7 @@ function formatTs(ts) {
 
 .action-empty {
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: var(--t-micro);
   color: var(--text-dim);
   letter-spacing: 0.06em;
 }
@@ -473,7 +473,7 @@ function formatTs(ts) {
 
 .action-type {
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: var(--t-micro);
   font-weight: 700;
   letter-spacing: 0.08em;
 }
@@ -488,7 +488,7 @@ function formatTs(ts) {
 }
 
 .action-ts {
-  font-size: 8px;
+  font-size: var(--t-micro);
   color: var(--text-dim);
   letter-spacing: 0.06em;
 }
@@ -497,10 +497,10 @@ function formatTs(ts) {
 
 /* --- Chat console --- */
 .model-tag {
-  font-size: 7px;
-  color: #22d3ee;
-  background: rgba(34, 211, 238, 0.1);
-  border: 1px solid rgba(34, 211, 238, 0.3);
+  font-size: var(--t-micro);
+  color: var(--accent-blue);
+  background: rgba(201, 162, 39, 0.1);
+  border: 1px solid rgba(201, 162, 39, 0.3);
   border-radius: 3px;
   padding: 1px 4px;
   margin-left: 6px;
@@ -518,7 +518,7 @@ function formatTs(ts) {
 }
 
 .chat-hint {
-  font-size: 9px;
+  font-size: var(--t-micro);
   color: var(--text-dim);
   line-height: 1.6;
   padding: 4px;
@@ -533,7 +533,7 @@ function formatTs(ts) {
 
 .msg-who {
   font-family: var(--font-mono);
-  font-size: 7px;
+  font-size: var(--t-micro);
   font-weight: 700;
   letter-spacing: 0.06em;
   padding: 2px 4px;
@@ -543,10 +543,10 @@ function formatTs(ts) {
 }
 
 .msg-user .msg-who { color: var(--accent-blue); background: var(--accent-blue-dim); }
-.msg-assistant .msg-who { color: #22d3ee; background: rgba(34, 211, 238, 0.12); }
+.msg-assistant .msg-who { color: var(--accent-blue); background: rgba(201, 162, 39, 0.12); }
 
 .msg-text {
-  font-size: 10.5px;
+  font-size: var(--t-label);
   line-height: 1.5;
   color: var(--text-secondary);
   word-break: break-word;
@@ -557,7 +557,7 @@ function formatTs(ts) {
 .typing { display: flex; gap: 3px; padding: 4px 0; }
 .typing span {
   width: 5px; height: 5px; border-radius: 50%;
-  background: #22d3ee; opacity: 0.5;
+  background: var(--accent-blue); opacity: 0.5;
   animation: typing-bounce 1s infinite ease-in-out;
 }
 .typing span:nth-child(2) { animation-delay: 0.15s; }
@@ -583,7 +583,7 @@ function formatTs(ts) {
   outline: none;
   transition: border-color 0.15s;
 }
-.chat-input:focus { border-color: #22d3ee; }
+.chat-input:focus { border-color: var(--accent-blue); }
 .chat-input::placeholder { color: var(--text-dim); }
 
 .chat-send {
@@ -591,12 +591,12 @@ function formatTs(ts) {
   align-items: center;
   justify-content: center;
   width: 30px;
-  background: rgba(34, 211, 238, 0.12);
-  border: 1px solid rgba(34, 211, 238, 0.35);
+  background: rgba(201, 162, 39, 0.12);
+  border: 1px solid rgba(201, 162, 39, 0.35);
   border-radius: 4px;
-  color: #22d3ee;
+  color: var(--accent-blue);
   transition: all 0.15s;
 }
-.chat-send:hover:not(:disabled) { background: rgba(34, 211, 238, 0.25); box-shadow: 0 0 8px rgba(34, 211, 238, 0.3); }
+.chat-send:hover:not(:disabled) { background: rgba(201, 162, 39, 0.25); box-shadow: 0 0 8px rgba(201, 162, 39, 0.3); }
 .chat-send:disabled { opacity: 0.35; cursor: not-allowed; }
 </style>

@@ -152,7 +152,7 @@ function getOrgCode(name) {
   align-items: center;
   gap: 6px;
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: var(--t-micro);
   font-weight: 700;
   letter-spacing: 0.14em;
   color: var(--text-secondary);
@@ -166,7 +166,7 @@ function getOrgCode(name) {
 
 .failover-label {
   font-family: var(--font-mono);
-  font-size: 8px;
+  font-size: var(--t-micro);
   letter-spacing: 0.1em;
   color: var(--text-dim);
 }
@@ -208,9 +208,9 @@ function getOrgCode(name) {
 }
 
 .node-leader {
-  border-color: rgba(59, 130, 246, 0.4) !important;
-  background: rgba(59, 130, 246, 0.04) !important;
-  box-shadow: 0 0 12px rgba(59, 130, 246, 0.1);
+  border-color: rgba(201, 162, 39, 0.4) !important;
+  background: rgba(201, 162, 39, 0.04) !important;
+  box-shadow: 0 0 12px rgba(201, 162, 39, 0.1);
 }
 
 .node-top {
@@ -249,10 +249,10 @@ function getOrgCode(name) {
 /* Org badge */
 .node-org-badge {
   font-family: var(--font-mono);
-  font-size: 8px;
+  font-size: var(--t-micro);
   font-weight: 700;
   padding: 1px 4px;
-  background: rgba(59, 130, 246, 0.1);
+  background: rgba(201, 162, 39, 0.1);
   border: 1px solid var(--border);
   border-radius: 2px;
   color: var(--text-secondary);
@@ -265,12 +265,12 @@ function getOrgCode(name) {
   align-items: center;
   gap: 2px;
   font-family: var(--font-mono);
-  font-size: 7px;
+  font-size: var(--t-micro);
   font-weight: 700;
   letter-spacing: 0.08em;
   color: var(--accent-blue);
   background: var(--accent-blue-dim);
-  border: 1px solid rgba(59, 130, 246, 0.3);
+  border: 1px solid rgba(201, 162, 39, 0.3);
   padding: 1px 5px;
   border-radius: 2px;
   margin-left: auto;
@@ -285,14 +285,14 @@ function getOrgCode(name) {
 }
 
 .node-logid {
-  font-size: 8px;
+  font-size: var(--t-micro);
   color: var(--text-dim);
   letter-spacing: 0.08em;
 }
 
 .node-status-text {
   font-family: var(--font-mono);
-  font-size: 8px;
+  font-size: var(--t-micro);
   font-weight: 700;
   letter-spacing: 0.1em;
 }
@@ -307,7 +307,7 @@ function getOrgCode(name) {
   gap: 3px;
   padding: 3px 6px;
   border-radius: 3px;
-  font-size: 8px;
+  font-size: var(--t-micro);
   font-weight: 700;
   letter-spacing: 0.08em;
   font-family: var(--font-mono);

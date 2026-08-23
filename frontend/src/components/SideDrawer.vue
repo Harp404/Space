@@ -45,7 +45,7 @@ defineProps({
   top: { type: Number, default: 120 },
   width: { type: Number, default: 420 },
   height: { type: Number, default: 240 },
-  accent: { type: String, default: '#22d3ee' },
+  accent: { type: String, default: 'var(--accent-blue)' },
 })
 
 const open = ref(false)
@@ -53,18 +53,35 @@ const open = ref(false)
 
 <style scoped>
 .sd-tab {
+  /* Was a glowing gradient pill with vertical rotated text — five of them
+     stacked down the right edge read as clutter, not navigation. Now a flat
+     tab that states what it opens. */
   position: fixed;
   z-index: 1400;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 0;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 18%, transparent), color-mix(in srgb, var(--accent) 7%, transparent));
-  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
-  color: var(--accent);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-bright);
+  border-right: none;
+  color: var(--text-secondary);
   cursor: pointer;
-  box-shadow: 0 0 18px color-mix(in srgb, var(--accent) 22%, transparent), -2px 0 12px rgba(0,0,0,0.4);
-  transition: all 0.18s;
+  box-shadow: -6px 0 20px rgba(0, 0, 0, 0.55);
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.sd-tab:hover {
+  background: var(--bg-panel-2);
+  color: var(--text-primary);
+  border-color: var(--accent);
+}
+/* the accent shows as a single edge stripe, not a glow around everything */
+.sd-tab::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 2px;
+  background: var(--accent);
 }
 .sd-tab-label {
   font-family: var(--font-mono);
@@ -81,7 +98,7 @@ const open = ref(false)
   border-right: none;
   border-radius: 8px 0 0 8px;
 }
-.sd-tab-right .sd-tab-label { writing-mode: vertical-rl; text-orientation: mixed; }
+.sd-tab-right .sd-tab-label { writing-mode: vertical-rl; text-orientation: mixed; font-size: 11px; letter-spacing: 1.6px; padding: 14px 0; }
 .sd-tab-right:hover { width: 46px; background: color-mix(in srgb, var(--accent) 28%, transparent); }
 
 /* Left-edge tab */
@@ -112,7 +129,7 @@ const open = ref(false)
   position: fixed;
   inset: 0;
   z-index: 1450;
-  background: rgba(2, 6, 16, 0.45);
+  background: rgba(8, 9, 11, 0.45);
   backdrop-filter: blur(1.5px);
 }
 
@@ -121,7 +138,7 @@ const open = ref(false)
   z-index: 1500;
   display: flex;
   flex-direction: column;
-  background: linear-gradient(180deg, #0a1018 0%, #070b12 100%);
+  background: linear-gradient(180deg, var(--bg-deep) 0%, #070b12 100%);
   box-shadow: -10px 0 40px rgba(0, 0, 0, 0.6);
 }
 .sd-drawer-right {

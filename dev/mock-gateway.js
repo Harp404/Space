@@ -95,38 +95,44 @@ function seedState() {
     { id: 20, norad_id: 44059, name: 'ONEWEB-0008',        operator: 'OneWeb',         lat:  80.1,  lon:   15.4,  alt_km: 1200, status: 'NOMINAL',   risk_score: 47 },
   ];
 
+  // Seeded fallback events (used until the real Space-Track screening lands).
+  // TCAs are generated RELATIVE TO NOW so this data is never stale — a fixed
+  // date would make every event fail FR-06 the day after it was written.
+  const H = 3600 * 1000;
+  const inHours = (h) => new Date(Date.now() + h * H).toISOString();
+
   conjunctions = [
     {
       id: 1, sat1_id: 3,  sat2_id: 4,  sat1_name: 'COSMOS-2251 DEB', sat2_name: 'IRIDIUM-33 DEB',
-      tca: '2026-06-10T14:32:00Z', min_range_km: 0.08, probability: 0.12, risk_index: 88.5, status: 'MONITORING',
+      tca: inHours(3.5), min_range_km: 0.08, dilution_threshold_km: 0.057, probability: 0.12, risk_index: 88.5, status: 'MONITORING', source: 'SGP4', tle_age_days: 1.2, position_sigma_m: 210,
     },
     {
       id: 2, sat1_id: 2,  sat2_id: 8,  sat1_name: 'STARLINK-1008',   sat2_name: 'STARLINK-1012',
-      tca: '2026-06-10T18:45:00Z', min_range_km: 0.31, probability: 0.07, risk_index: 67.2, status: 'MONITORING',
+      tca: inHours(9.2), min_range_km: 0.31, dilution_threshold_km: 0.219, probability: 0.07, risk_index: 67.2, status: 'MONITORING', source: 'SGP4', tle_age_days: 1.2, position_sigma_m: 210,
     },
     {
       id: 3, sat1_id: 9,  sat2_id: 5,  sat1_name: 'COSMOS-2251 DEB', sat2_name: 'SENTINEL-2A',
-      tca: '2026-06-11T02:12:00Z', min_range_km: 0.55, probability: 0.04, risk_index: 52.1, status: 'MONITORING',
+      tca: inHours(27.0), min_range_km: 0.55, dilution_threshold_km: 0.389, probability: 0.04, risk_index: 52.1, status: 'MONITORING', source: 'SGP4', tle_age_days: 1.2, position_sigma_m: 210,
     },
     {
       id: 4, sat1_id: 15, sat2_id: 14, sat1_name: 'FENGYUN-1C DEB',  sat2_name: 'SL-16 R/B',
-      tca: '2026-06-11T09:05:00Z', min_range_km: 0.19, probability: 0.09, risk_index: 79.4, status: 'MONITORING',
+      tca: inHours(34.1), min_range_km: 0.19, dilution_threshold_km: 0.134, probability: 0.09, risk_index: 79.4, status: 'MONITORING', source: 'SGP4', tle_age_days: 1.2, position_sigma_m: 210,
     },
     {
       id: 5, sat1_id: 16, sat2_id: 12, sat1_name: 'COSMOS-1408 DEB', sat2_name: 'ONEWEB-0012',
-      tca: '2026-06-11T21:30:00Z', min_range_km: 0.42, probability: 0.03, risk_index: 44.0, status: 'APPROVED',
+      tca: inHours(46.8), min_range_km: 0.42, dilution_threshold_km: 0.297, probability: 0.03, risk_index: 44.0, status: 'APPROVED', source: 'SGP4', tle_age_days: 0.9, position_sigma_m: 190,
     },
     {
       id: 6, sat1_id: 11, sat2_id: 17, sat1_name: 'STARLINK-1017',   sat2_name: 'STARLINK-1020',
-      tca: '2026-06-12T06:18:00Z', min_range_km: 0.27, probability: 0.05, risk_index: 38.7, status: 'RESOLVED',
+      tca: inHours(55.3), min_range_km: 0.27, dilution_threshold_km: 0.191, probability: 0.05, risk_index: 38.7, status: 'RESOLVED', source: 'SGP4', tle_age_days: 1.4, position_sigma_m: 205,
     },
     {
       id: 7, sat1_id: 18, sat2_id: 1,  sat1_name: 'IRIDIUM-33 DEB',  sat2_name: 'ISS (ZARYA)',
-      tca: '2026-06-12T14:50:00Z', min_range_km: 0.93, probability: 0.01, risk_index: 22.3, status: 'MONITORING',
+      tca: inHours(63.9), min_range_km: 0.93, dilution_threshold_km: 0.658, probability: 0.01, risk_index: 22.3, status: 'MONITORING', source: 'SGP4', tle_age_days: 1.2, position_sigma_m: 210,
     },
     {
       id: 8, sat1_id: 3,  sat2_id: 15, sat1_name: 'COSMOS-2251 DEB', sat2_name: 'FENGYUN-1C DEB',
-      tca: '2026-06-13T03:44:00Z', min_range_km: 0.12, probability: 0.10, risk_index: 91.0, status: 'MONITORING',
+      tca: inHours(76.4), min_range_km: 0.12, dilution_threshold_km: 0.085, probability: 0.10, risk_index: 91.0, status: 'MONITORING', source: 'SGP4', tle_age_days: 1.2, position_sigma_m: 210,
     },
   ];
 
@@ -141,6 +147,549 @@ function computeLeader() {
 }
 
 seedState();
+
+// ---------------------------------------------------------------------------
+// Constraint gate — the Flight Rules layer.
+//
+// Every maneuver must clear a published rulebook before the operator cluster is
+// allowed to vote on it. The gate emits one completion signal per event —
+// COMPLETE / PARTIAL / BLOCKED / UNRESOLVED — and that signal decides both
+// whether the poll may run and how each operator votes.
+//
+// The engine itself is domain-agnostic (dev/constraints/engine.js): it takes a
+// rulebook and a context and knows nothing about satellites. See
+// rulebooks/release-gate.js for the same engine gating a software release.
+// ---------------------------------------------------------------------------
+
+const CE = require('./constraints/engine');
+const { maneuverRulebook, describe: describeRulebook, classify, LIMITS: FR } = require('./constraints/rulebooks/orbital');
+const CV = require('./constraints/voting');
+const { PropellantLedger } = require('./constraints/ledger');
+const SW = require('./constraints/spaceweather');
+const RE = require('./constraints/reentry');
+const { reentryRulebook } = require('./constraints/rulebooks/reentry');
+const { releaseRulebook, SCENARIOS: RELEASE_SCENARIOS } = require('./constraints/rulebooks/release-gate');
+const FLARES = require('./constraints/flares');
+const CONFORMAL = require('./constraints/conformal');
+const AUTHORING = require('./constraints/authoring');
+const MODELS = require('./constraints/models');
+const SNAPSHOT = require('./snapshot');
+const OPFEEDS = require('./constraints/operator-feeds');
+const RECOURSE = require('./constraints/recourse');
+const RESOLV = require('./constraints/resolvability');
+const ORBITAL_SUPPLY = require('./constraints/rulebooks/orbital').supplyEvidence;
+const RELEASE_SUPPLY = require('./constraints/rulebooks/release-gate').supplyEvidence;
+const DISPATCH = require('./constraints/rulebooks/dispatch');
+const HORIZON = require('./constraints/horizon');
+const STORY = require('./constraints/story');
+
+/**
+ * Demo mode. SNAPSHOT=1 serves the frozen capture instead of hitting live APIs,
+ * so a recording never waits on a network. Everything served is REAL data that
+ * was captured live — and FR-00 still audits its age and will BLOCK the system
+ * if it goes stale. A cached real answer is a recording; a fabricated one is a
+ * lie, and this is the former.
+ */
+const USE_SNAPSHOT = process.env.SNAPSHOT === '1' && !!SNAPSHOT.snapshotDir();
+
+const ledger = new PropellantLedger();
+
+/**
+ * Rules authored live, in English. They are validated deterministically and
+ * interpreted from a data structure — never executed as generated code. See
+ * constraints/authoring.js.
+ */
+const authored = new AUTHORING.AuthoredRules();
+
+/** The maneuver rulebook, plus anything authored at runtime. */
+function activeRulebook() { return authored.extend(maneuverRulebook); }
+
+/** Waivers on record, keyed by conjunction id. */
+const waiverStore = new Map();
+/** Cached avoidance plans, so a report upgrades from UNRESOLVED once PLAN is run. */
+const planStore = new Map();
+/** Operator notification/acknowledgement state per event (SSC 8.i). */
+const ackStore = new Map();
+
+/**
+ * Rolling element-set store.
+ *
+ * The maneuver detector needs two epochs of the same object to see a step in
+ * semi-major axis. A single catalogue snapshot cannot provide that, so we keep
+ * the previous epoch for every object and compare on each refresh.
+ *
+ * Before a second epoch exists the check is simply not made, and FR-10 falls
+ * back to its age test. It does NOT guess.
+ */
+// Resolved lazily: CACHE_DIR is declared further down the file, so referencing
+// it at module top level hits the temporal dead zone.
+const epochStorePath = () => path.join(__dirname, 'cache', 'epochs.json');
+let epochStore = null;
+
+function loadEpochStore() {
+  if (epochStore) return epochStore;
+  try { epochStore = JSON.parse(fs.readFileSync(epochStorePath(), 'utf8')); }
+  catch { epochStore = {}; }
+  return epochStore;
+}
+
+const MU_SMA = 398600.4418;
+function smaFromMeanMotion(revPerDay) {
+  const n = (revPerDay * 2 * Math.PI) / 86400;
+  return Math.cbrt(MU_SMA / (n * n));
+}
+
+/**
+ * Record the current epoch for every catalogued object, and flag any whose
+ * semi-major axis stepped further than its own drag baseline can explain.
+ */
+function updateEpochStore(catText) {
+  const det = MODELS.get('maneuver-detector');
+  const store = loadEpochStore();
+  const lines = catText.split('\n');
+  const flags = new Map();
+  let compared = 0, flagged = 0;
+
+  for (let i = 0; i + 2 < lines.length; i += 3) {
+    const name = lines[i].replace(/^0 /, '').trim();
+    const l1 = lines[i + 1], l2 = lines[i + 2];
+    if (!l1 || !l2 || !l1.startsWith('1 ') || !l2.startsWith('2 ')) continue;
+    const norad = parseInt(l2.slice(2, 7), 10);
+    const mm = parseFloat(l2.slice(52, 63));
+    const epochRaw = parseFloat(l1.slice(18, 32));
+    if (!Number.isFinite(norad) || !Number.isFinite(mm) || !Number.isFinite(epochRaw)) continue;
+
+    const sma = smaFromMeanMotion(mm);
+    const prev = store[norad];
+    store[norad] = { sma: +sma.toFixed(4), epoch: epochRaw, name };
+
+    if (!prev || !det) continue;
+    // Epoch field is YYDDD.ffff — a day difference within the same year.
+    const dt = (epochRaw - prev.epoch);
+    if (!(dt > 0.05 && dt < 5)) continue;
+    compared++;
+
+    const dadt = (sma - prev.sma) / dt;
+    const prof = det.per_object && det.per_object[String(norad)];
+    // Without a per-object profile we do NOT borrow a global baseline — drag
+    // regime is per object, which is the whole lesson of that calibration.
+    if (!prof || !Number.isFinite(prof.robust_sigma_km_day)) continue;
+    const z = Math.abs((dadt - prof.median_da_dt_km_day) / Math.max(prof.robust_sigma_km_day, 1e-9));
+    if (z > (det.z_threshold || 4)) {
+      flags.set(norad, { detected: true, object: name, delta_a_km: +(sma - prev.sma).toFixed(3), z, dt_days: +dt.toFixed(2) });
+      flagged++;
+    } else {
+      flags.set(norad, { detected: false, object: name });
+    }
+  }
+
+  try { fs.mkdirSync(path.dirname(epochStorePath()), { recursive: true }); fs.writeFileSync(epochStorePath(), JSON.stringify(store)); } catch {}
+  maneuverFlags = flags;
+  if (compared) console.log(`[Maneuvers] compared ${compared} objects against their previous epoch · ${flagged} flagged as unannounced`);
+  return flags;
+}
+
+/** norad -> maneuver flag, populated on each catalogue load. */
+let maneuverFlags = new Map();
+
+/** Freshness of our OWN evidence — what FR-00 audits. */
+function systemHealth() {
+  const ageOf = (file) => { try { return Date.now() - fs.statSync(file).mtimeMs; } catch { return null; } };
+  if (USE_SNAPSHOT) {
+    // Snapshot mode does NOT exempt us from FR-00. The age reported is the
+    // snapshot's real capture time, so a stale snapshot blocks the system
+    // exactly as stale live data would.
+    const m = SNAPSHOT.manifest();
+    const age = m ? Date.now() - Date.parse(m.captured_at) : null;
+    return {
+      catalogue_age_ms: age, cdm_age_ms: age,
+      propagator_ok: !!satLib,
+      catalogue_ttl_ms: CATALOGUE_TTL_MS,
+      snapshot: true, snapshot_captured_at: m && m.captured_at,
+    };
+  }
+  return {
+    catalogue_age_ms: ageOf(CATALOGUE_FILE),
+    cdm_age_ms: ageOf(CDM_FILE),
+    propagator_ok: !!satLib,
+    catalogue_ttl_ms: CATALOGUE_TTL_MS,
+  };
+}
+
+/**
+ * Live space-weather + ground-segment state. Populated by the NOAA SWPC feed in
+ * Phase 3; until then these stay null, which correctly reads as UNRESOLVED
+ * rather than as "conditions are fine".
+ */
+let spaceWeather = null;
+let groundSegment = null;
+let swReplay = null;          // when set, a recorded historical scenario overrides live conditions
+
+/**
+ * Refresh space weather from NOAA. On failure both values stay null, which the
+ * rulebook reads as UNRESOLVED — never as "conditions are fine". That is the
+ * whole point: a dead feed must not look like a clear sky.
+ */
+async function refreshSpaceWeather() {
+  if (swReplay) return;                                  // a replay is pinned
+  if (USE_SNAPSHOT) {
+    try {
+      const snap = JSON.parse(fs.readFileSync(path.join(SNAPSHOT.SNAP, 'spaceweather.json'), 'utf8'));
+      spaceWeather = { ...snap.conditions, from_snapshot: true };
+      groundSegment = snap.ground_segment;
+    } catch { spaceWeather = null; groundSegment = null; }
+    return;
+  }
+  try {
+    const c = await SW.fetchConditions();
+    spaceWeather = c;
+    groundSegment = SW.groundSegment(c);
+  } catch (e) {
+    spaceWeather = null;
+    groundSegment = null;
+    console.log('[SpaceWeather] unavailable:', e.message, '- affected rules will report UNRESOLVED');
+  }
+}
+
+/**
+ * Solar flare nowcast + forecast.
+ *
+ * This is what makes the completion signal PREDICTIVE instead of reactive: a
+ * flare forecast gives lead time on when FR-19 (command uplink) will be
+ * violated, rather than telling us after the blackout has already started.
+ */
+let flareState = null;
+
+async function refreshFlares() {
+  if (swReplay) return;                                  // a replay pins conditions
+  if (USE_SNAPSHOT) {
+    try { flareState = JSON.parse(fs.readFileSync(path.join(SNAPSHOT.SNAP, 'flares.json'), 'utf8')); }
+    catch { flareState = null; }
+    return;
+  }
+  try {
+    flareState = await FLARES.assess();
+  } catch (e) {
+    flareState = null;                                   // → predictive rules go UNRESOLVED
+    console.log('[Flares] X-ray feed unavailable:', e.message);
+  }
+}
+
+/** Pin a recorded historical scenario (e.g. the Gannon storm), or clear it. */
+function setReplay(id) {
+  if (!id) { swReplay = null; return refreshSpaceWeather(); }
+  const r = SW.replay(id);
+  if (!r) return null;
+  swReplay = r;
+  spaceWeather = r.conditions;
+  groundSegment = r.groundSegment;
+  return r;
+}
+
+/**
+ * SSC 8.i — operators must notify every operator of an active spacecraft in the
+ * conjunction, "even if the other spacecraft is/are un-maneuverable or minimally
+ * maneuverable". Acknowledgement is tracked per event.
+ *
+ * Un-acknowledged is deliberately UNEVALUATED rather than VIOLATED: we do not
+ * know the other operator's position, and SSC 8.h prescribes a specific fallback
+ * for exactly that case (act on the more stringent of the two risk tolerances).
+ */
+function operatorOf(name) {
+  const n = String(name || '').toUpperCase();
+  if (/STARLINK/.test(n)) return 'SpaceX';
+  if (/ONEWEB/.test(n)) return 'OneWeb';
+  if (/SENTINEL|GALILEO|ESA|SWARM|CRYOSAT|AEOLUS/.test(n)) return 'ESA';
+  if (/CARTOSAT|RISAT|OCEANSAT|IRNSS|GSAT|RESOURCESAT/.test(n)) return 'ISRO';
+  if (/ALOS|HIMAWARI|IBUKI|JAXA|MICHIBIKI/.test(n)) return 'JAXA';
+  if (/NOAA|DMSP|GOES|LANDSAT|TERRA|AQUA|SUOMI/.test(n)) return 'NOAA/USG';
+  if (/ISS|ZARYA|TIANHE|CSS|SOYUZ|SHENZHOU|PROGRESS/.test(n)) return 'Human spaceflight';
+  return null;
+}
+
+/** Distinct active operators involved — the parties SSC 8.i requires us to notify. */
+function involvedOperators(conj) {
+  const out = [];
+  for (const name of [conj.sat1_name, conj.sat2_name]) {
+    if (classify(name) === 'NONMANEUVERABLE') continue;   // inert objects have no operator to notify
+    const op = operatorOf(name);
+    if (op && !out.includes(op)) out.push(op);
+  }
+  return out;
+}
+
+/** Initialise notification state for an event the first time it is assessed. */
+function notificationState(conj) {
+  if (!ackStore.has(conj.id)) {
+    const parties = involvedOperators(conj);
+    ackStore.set(conj.id, {
+      required: parties.length,
+      acknowledged: 0,
+      parties: parties.map((p) => ({ operator: p, notified_at: new Date().toISOString(), acknowledged_at: null })),
+    });
+  }
+  return ackStore.get(conj.id);
+}
+
+/** The primary (manoeuvring) asset for an event — the one whose propellant pays. */
+function primaryAsset(conj) {
+  const a = classify(conj.sat1_name), b = classify(conj.sat2_name);
+  const canA = a && a !== 'NONMANEUVERABLE', canB = b && b !== 'NONMANEUVERABLE';
+  if (canA) return conj.sat1_name;
+  if (canB) return conj.sat2_name;
+  return null;
+}
+
+/** Assemble everything the rulebook needs for one event. */
+function constraintContext(conj) {
+  const asset = primaryAsset(conj);
+  const plan = planStore.get(conj.id) || null;
+  // A maneuver on EITHER object voids the encounter geometry.
+  const mf = maneuverFlags.get(conj.sat1_id) || maneuverFlags.get(conj.sat2_id) || null;
+  return {
+    conj: mf ? { ...conj, maneuver_flag: mf } : conj,
+    plan,
+    cluster: {
+      online_nodes: nodes.filter((n) => n.online).length,
+      total_nodes: nodes.length,
+      leader_id: leaderId,
+    },
+    system: systemHealth(),
+    propellant: asset ? ledger.get(asset) : null,
+    asset: asset ? { name: asset } : null,
+    notifications: notificationState(conj),
+    groundSegment,
+    spaceWeather: spaceWeather ? { ...spaceWeather, flares: flareState } : null,
+  };
+}
+
+/** Evaluate one event against the maneuver rulebook. */
+function constraintReport(conj) {
+  return CE.evaluate({
+    rulebook: activeRulebook(),
+    context: constraintContext(conj),
+    waivers: waiverStore.get(conj.id) || [],
+    now: Date.now(),
+  });
+}
+
+/** Compact per-row signal for the conjunction list — cheap enough to broadcast. */
+function constraintBadge(conj) {
+  try {
+    const r = constraintReport(conj);
+    return {
+      signal: r.signal,
+      progress: r.progress,
+      blocking: r.blocking.length,
+      unevaluated: r.unevaluated.length,
+      first: (r.blocking[0] || r.unevaluated[0] || r.advisory[0] || null)?.id || null,
+      deadline_in_ms: r.deadline ? r.deadline.in_ms : null,
+      authorised: r.authorised,
+    };
+  } catch (e) {
+    // A failure to evaluate is itself an unresolved state, never a pass.
+    return { signal: 'UNRESOLVED', progress: 0, blocking: 0, unevaluated: 1, first: null, error: e.message, authorised: false };
+  }
+}
+
+/** Fleet-level completion signal — "show whether THE RELATED WORK is complete". */
+function fleetSignal() {
+  const reports = conjunctions.map((c) => { try { return constraintReport(c); } catch { return null; } }).filter(Boolean);
+  const roll = CE.rollup(reports);
+
+  // Value of information: which single piece of evidence closes the most rules
+  // across the whole fleet, weighted by how urgent the affected events are.
+  const byEvidence = new Map();
+  reports.forEach((r, i) => {
+    const conj = conjunctions[i];
+    for (const ev of r.evidence_needed) {
+      const e = byEvidence.get(ev.evidence) || { evidence: ev.evidence, label: ev.label, cost: ev.cost, rules: 0, events: 0, urgent: 0, event_ids: [] };
+      e.rules += ev.closes.length;
+      e.events += 1;
+      if (r.deadline && r.deadline.in_ms < 6 * 3600000) e.urgent += 1;
+      if (conj) e.event_ids.push(conj.id);
+      byEvidence.set(ev.evidence, e);
+    }
+  });
+  const evidence = [...byEvidence.values()].sort((a, b) => (b.rules - a.rules) || (b.urgent - a.urgent));
+
+  return {
+    ...roll,
+    rulebook: { id: maneuverRulebook.id, title: maneuverRulebook.title, rules: activeRulebook().rules.length, authored: authored.rules.length },
+    best_next_evidence: evidence[0] || null,
+    evidence,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// THE RETURN LEG — controlled deorbit planning.
+//
+// AstroMesh covered launch and on-orbit. This is the third phase: coming down.
+// A deorbit is screened through the shells on the way down (FR-22), its ground
+// footprint is computed as a Monte Carlo distribution rather than a line, and
+// the casualty expectancy is evaluated against the real ground consequence
+// raster (FR-17a / FR-17b / FR-23 / FR-24 / FR-25).
+// ---------------------------------------------------------------------------
+
+const deorbitStore = new Map();     // norad -> plan
+
+/** Debris casualty area by object class, from published survivability data. */
+function casualtyAreaFor(name, rcsClass) {
+  const n = String(name || '').toUpperCase();
+  if (/R\/B|ROCKET|CZ-|SL-\d|DELTA|CENTAUR|ARIANE/.test(n)) return RE.CASUALTY_AREA_M2.ROCKET_BODY;
+  if (/STARLINK/.test(n)) return RE.CASUALTY_AREA_M2.DEMISABLE_SMALLSAT;   // design-for-demise
+  if (rcsClass === 2) return RE.CASUALTY_AREA_M2.LARGE_PAYLOAD;
+  if (rcsClass === 0) return RE.CASUALTY_AREA_M2.DEMISABLE_SMALLSAT;
+  return RE.CASUALTY_AREA_M2.TYPICAL_LEO_PAYLOAD;
+}
+
+/**
+ * Plan a controlled deorbit.
+ *
+ * @param {number} norad
+ * @param {object} opts  { lead_minutes, recoverable, burn_offset_s }
+ */
+function planDeorbit(norad, opts = {}) {
+  if (!satLib) return { error: 'propagator unavailable' };
+  const rec = satrecByNorad(norad);
+  if (!rec) return { error: `TLE not found for NORAD ${norad}` };
+
+  const name = (allRecs().find((o) => o.norad === norad) || {}).name || String(norad);
+  const incDeg = (rec.inclo * 180) / Math.PI;
+  const nowMs = Date.now();
+  // A deorbit burn is planned ahead; the offset lets the operator walk the
+  // corridor across the ground track, which is how retargeting actually works.
+  const burnMs = nowMs + (opts.lead_minutes ?? 45) * 60000 + (opts.burn_offset_s ?? 0) * 1000;
+
+  const pv = satLib.propagate(rec, new Date(burnMs));
+  if (!pv || !pv.position) return { error: 'propagation failed at the burn epoch' };
+
+  // Descent to entry interface. A retrograde burn lowers perigee; the object
+  // then coasts down. We screen the coast arc against the catalogue.
+  const T = Math.min(periodMin(rec), 200);
+  const STEP_S = 45;
+  const steps = Math.ceil((T * 60) / STEP_S);
+  const track = [];
+  for (let i = 0; i <= steps; i++) {
+    const p = satLib.propagate(rec, new Date(burnMs + i * STEP_S * 1000));
+    if (p && p.position) track.push(p.position);
+  }
+
+  // FR-22 — the descent passes through occupied shells. Reuse the same COLA
+  // engine the reroute planner uses; a deorbit is just a maneuver pointed down.
+  let descent = { conjunctions: [], screened: 0, catalogue: 0 };
+  try {
+    const v1 = pv.velocity;
+    const scr = screenReroutedVsCatalogue(track, burnMs, STEP_S, bandOf(pv.position, v1), new Set([norad]), 5);
+    descent = { conjunctions: scr.hits, screened: scr.screened, catalogue: scr.catalogue };
+  } catch (e) {
+    descent = null;                                  // → FR-22 UNEVALUATED, honestly
+  }
+
+  // Entry interface sub-satellite point.
+  const entryMs = burnMs + (opts.coast_minutes ?? 35) * 60000;
+  const pe = satLib.propagate(rec, new Date(entryMs));
+  if (!pe || !pe.position) return { error: 'propagation failed at entry interface' };
+  const gmst = satLib.gstime(new Date(entryMs));
+  const geo = satLib.eciToGeodetic(pe.position, gmst);
+  const entryLat = satLib.degreesLat(geo.latitude);
+  const entryLon = satLib.degreesLong(geo.longitude);
+
+  const bc = opts.ballistic_coefficient ?? 80;
+  const kp = spaceWeather ? spaceWeather.kp : null;
+
+  const fp = RE.footprint({
+    entry_lat: entryLat, entry_lon: entryLon,
+    inclination_deg: incDeg, ballistic_coefficient: bc,
+    kp, seed: `${norad}:${Math.round(burnMs / 60000)}`,
+  });
+
+  const acM2 = casualtyAreaFor(name, opts.rcs_class);
+  const plan = {
+    norad, name,
+    inclination_deg: +incDeg.toFixed(2),
+    burn_time: new Date(burnMs).toISOString(),
+    entry_interface: { lat: +entryLat.toFixed(3), lon: +entryLon.toFixed(3), alt_km: RE.LIMITS.ENTRY_INTERFACE_KM, time: new Date(entryMs).toISOString() },
+    ballistic_coefficient: bc,
+    recoverable: opts.recoverable === true,
+    footprint: fp,
+    casualty: RE.casualtyExpectancy(fp, acM2),
+    consequence: RE.consequenceProfile(fp),
+    maritime: null,                                  // AIS layer not loaded → FR-24 UNEVALUATED
+    recovery: opts.recovery || null,
+    descent,
+    burn_offset_s: opts.burn_offset_s ?? 0,
+  };
+  deorbitStore.set(norad, plan);
+  return plan;
+}
+
+/** Context for the re-entry rulebook. */
+function deorbitContext(plan) {
+  return {
+    reentry: plan,
+    descent: plan.descent,
+    cluster: { online_nodes: nodes.filter((n) => n.online).length, total_nodes: nodes.length, leader_id: leaderId },
+    system: systemHealth(),
+    spaceWeather: spaceWeather ? { ...spaceWeather, flares: flareState } : null,
+    groundSegment,
+  };
+}
+
+function deorbitReport(plan) {
+  return CE.evaluate({ rulebook: reentryRulebook, context: deorbitContext(plan), waivers: [], now: Date.now() });
+}
+
+/**
+ * Minimum unblocking change — "what would fix it".
+ *
+ * Walk the burn epoch forward and find the smallest shift that moves the
+ * corridor to a state the rulebook clears. This is what turns the gate from a
+ * checker into a planner: it does not just say no, it says what would make it
+ * a yes.
+ */
+function retargetDeorbit(norad, opts = {}) {
+  const base = deorbitStore.get(norad) || planDeorbit(norad, opts);
+  if (base.error) return base;
+  const baseReport = deorbitReport(base);
+
+  // TARGET: no HARD violations — the "minimum UNBLOCKING set", not the minimum
+  // completing set. Retargeting the burn cannot manufacture evidence for a rule
+  // that was never evaluated, so chasing full authorisation here would search
+  // forever and report failure for the wrong reason.
+  const unblocked = (rep) => rep.blocking.length === 0;
+  if (unblocked(baseReport)) {
+    return { already_clear: true, offset_s: 0, report: baseReport, plan: base,
+      still_unresolved: baseReport.unevaluated.map((u) => ({ id: u.id, detail: u.detail })) };
+  }
+
+  // Walk in 60 s steps out to one full revolution — the corridor sweeps right
+  // across the ground track as the burn epoch moves.
+  const tried = [];
+  for (let off = 60; off <= 95 * 60; off += 60) {
+    const cand = planDeorbit(norad, { ...opts, burn_offset_s: off });
+    if (cand.error) continue;
+    const rep = deorbitReport(cand);
+    tried.push({ offset_s: off, signal: rep.signal, ec: cand.casualty ? cand.casualty.ec : null });
+    if (unblocked(rep)) {
+      deorbitStore.set(norad, cand);
+      return {
+        already_clear: false,
+        offset_s: off,
+        offset_human: `${Math.floor(off / 60)} min ${off % 60} s`,
+        from: { signal: baseReport.signal, ec: base.casualty ? base.casualty.ec : null, worst: base.consequence && base.consequence.worst ? base.consequence.worst.label : null },
+        to: { signal: rep.signal, ec: cand.casualty ? cand.casualty.ec : null, worst: cand.consequence && cand.consequence.worst ? cand.consequence.worst.label : null },
+        plan: cand, report: rep, searched: tried.length,
+        // Being unblocked is not the same as being complete. Say what is still open.
+        still_unresolved: rep.unevaluated.map((u) => ({ id: u.id, detail: u.detail })),
+      };
+    }
+  }
+  // Restore the original so a failed search does not leave a worse plan behind.
+  deorbitStore.set(norad, base);
+  return { already_clear: false, offset_s: null, searched: tried.length, report: baseReport, plan: base,
+    note: 'No burn epoch within one revolution clears the rulebook. A different disposal orbit or a lower ballistic coefficient is required.' };
+}
 
 // ---------------------------------------------------------------------------
 // WebSocket helpers
@@ -289,7 +838,19 @@ setInterval(() => {
   const monitoring = conjunctions.filter(c => c.status === 'MONITORING' && (isManeuverable(c.sat1_name) || isManeuverable(c.sat2_name)));
   if (monitoring.length === 0) return;
   const top = monitoring.reduce((a, b) => (a.risk_index >= b.risk_index ? a : b));
-  if (top.risk_index > 70 && top.status === 'MONITORING') {
+  // Say what the scan concluded even when it concludes "nothing to do" — an
+  // agent that only speaks when it acts is indistinguishable from one that is
+  // not running.
+  broadcast('AGENT_SCAN', {
+    scanned: monitoring.length,
+    top: { pair: `${top.sat1_name} × ${top.sat2_name}`, risk: top.risk_index },
+    threshold: 45,
+    acting: top.risk_index > 45 && top.status === 'MONITORING',
+  });
+  // Threshold 45: the debris-on-debris events score higher but cannot be
+  // commanded, and the commandable population in this catalogue tops out near
+  // 50 — a threshold of 70 meant the agent never spoke at all.
+  if (top.risk_index > 45 && top.status === 'MONITORING') {
     top.status = 'PLANNING';
     broadcast('CONJUNCTION_ALERT', { conjunction: top, agent: true });
     // Autonomous loop: plan a REAL avoidance maneuver, then put it to the cluster vote.
@@ -297,12 +858,33 @@ setInterval(() => {
       let plan = null;
       try { plan = planAvoidance(top); } catch { /* fall through */ }
       const m = plan && plan.maneuvers ? plan.maneuvers.find((x) => x.maneuverable) : null;
+      if (plan && !plan.error) {
+        plan.pc_before = Number.isFinite(top.probability) ? top.probability : conjMaxPc(plan.original_miss_km);
+        plan.pc_after = conjMaxPc(plan.new_miss_km);
+        planStore.set(top.id, plan);
+      }
       top.plan = plan && !plan.error ? {
         delta_v_ms: plan.total_delta_v_ms, new_miss_km: plan.new_miss_km,
         clear_vs_catalogue: plan.clear_vs_catalogue, sat: m ? m.sat : null,
         orbit_shift_deg: m ? m.orbit_shift_deg : null,
       } : null;
-      await runConsensus(top);          // real Raft vote → sets status + broadcasts MANEUVER_EVENT
+
+      // The autonomous agent is bound by the same gate as a human operator. It
+      // does not get to drive a blocked or unevaluated event to a vote — it
+      // reports what is outstanding and stands down.
+      const report = constraintReport(top);
+      top.constraint = constraintBadge(top);
+      if (!report.authorised) {
+        broadcast('CONSTRAINT_EVENT', {
+          conjunction_id: top.id, signal: report.signal, headline: report.headline,
+          agent: true, agent_stood_down: true,
+          next_actions: report.next_actions.slice(0, 3),
+        });
+        top.status = 'MONITORING';
+        return;
+      }
+
+      await runConsensus(top);
       if (top.status !== 'APPROVED') top.status = 'MONITORING';
     })();
   }
@@ -312,7 +894,10 @@ setInterval(() => {
 setInterval(() => {
   const monitoring = conjunctions.filter(c => c.status === 'MONITORING' && c.risk_index > 40);
   if (monitoring.length === 0) return;
-  const pick = monitoring[Math.floor(Math.random() * monitoring.length)];
+  // Screening surfaces the highest-risk event, it does not sample at random.
+  // The previous Math.random() pick meant the same fleet state could raise a
+  // different alert on each pass, which is not how a screening system behaves.
+  const pick = monitoring.reduce((a, b) => (b.risk_index > a.risk_index ? b : a));
   broadcast('CONJUNCTION_ALERT', {
     conjunction: pick,
     agent: false,
@@ -379,12 +964,23 @@ function readBody(req) {
 }
 
 function fullState() {
+  // Attach the four-state signal to every event so the list can badge each row
+  // without a round trip. Pure arithmetic over data already in memory.
+  let annotated = conjunctions;
+  let fleet = null;
+  try {
+    annotated = conjunctions.map((c) => ({ ...c, constraint: constraintBadge(c) }));
+    fleet = fleetSignal();
+  } catch (e) {
+    console.log('[constraints] badge pass skipped:', e.message);
+  }
   return {
     nodes,
     satellites,
-    conjunctions,
+    conjunctions: annotated,
     cdms,
     leader_id: leaderId,
+    fleet_signal: fleet,
   };
 }
 
@@ -393,7 +989,10 @@ function replicationSummary() {
   for (const n of nodes) {
     result[String(n.id)] = {
       nodeId: n.id,
-      lastLogId: conjunctions.filter(c => c.status === 'APPROVED').length + Math.floor(Math.random() * 3),
+      // A replicated log index is a COUNT of committed entries. It was
+      // previously jittered with Math.random(), which made the cluster look
+      // like it was diverging when nothing had happened.
+      lastLogId: conjunctions.filter((c) => c.status === 'APPROVED').length,
       online: n.online,
     };
   }
@@ -408,29 +1007,66 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function runConsensus(conj) {
-  const delay = 800 + Math.floor(Math.random() * 400);
-  await sleep(delay);
+/**
+ * Run the operator poll.
+ *
+ * Every vote is a pure function of the constraint report — see
+ * constraints/voting.js. The previous implementation used
+ * `Math.random() < 0.70`, which meant the same event could be approved and
+ * denied on consecutive runs and no operator could explain its own vote.
+ *
+ * `extraWaivers` carries emergency-declared waivers; they are evaluated by the
+ * same engine as any other waiver, so a non-negotiable rule is unaffected.
+ */
+async function runConsensus(conj, { extraWaivers = [] } = {}) {
+  const t0 = Date.now();
+  // Deliberation latency, so the UI can show the poll in progress. It does not
+  // affect the outcome — the outcome is already determined by the report.
+  await sleep(300);
 
-  const onlineNodes = nodes.filter(n => n.online);
-  const votes = onlineNodes.map(n => {
-    const voteYes = conj.risk_index > 40 || Math.random() < 0.70;
-    return { node_id: n.id, node_name: n.name, vote: voteYes ? 'YES' : 'NO' };
+  const waivers = [...(waiverStore.get(conj.id) || []), ...extraWaivers];
+  const report = CE.evaluate({
+    rulebook: activeRulebook(),
+    context: constraintContext(conj),
+    waivers,
+    now: Date.now(),
   });
 
-  const yesCount = votes.filter(v => v.vote === 'YES').length;
-  const approved = yesCount >= 3;
-  conj.status = approved ? 'APPROVED' : 'DENIED';
+  const onlineNodes = nodes.filter((n) => n.online);
+  const result = CV.poll(onlineNodes, report, FR.QUORUM);
 
-  broadcast('MANEUVER_EVENT', {
+  conj.status = result.approved ? 'APPROVED' : 'DENIED';
+  conj.constraint = constraintBadge(conj);
+
+  // An approved maneuver spends real propellant. The ledger refuses to touch the
+  // disposal reserve, so FR-05 is enforced structurally as well as by the rule.
+  let debit = null;
+  if (result.approved) {
+    const plan = planStore.get(conj.id);
+    const asset = primaryAsset(conj);
+    if (plan && asset && Number.isFinite(plan.total_delta_v_ms)) {
+      debit = ledger.debit(asset, plan.total_delta_v_ms, { conjunction_id: conj.id, ts: new Date().toISOString() });
+    }
+  }
+
+  const duration_ms = Date.now() - t0;
+  const payload = {
     conjunction_id: conj.id,
     status: conj.status,
-    votes,
-    yes_count: yesCount,
-    duration_ms: delay,
-  });
+    votes: result.votes,
+    yes_count: result.yes_count,
+    quorum: result.quorum,
+    duration_ms,
+    signal: report.signal,
+    signal_headline: report.headline,
+    deterministic: true,
+    waivers: waivers.length ? waivers : undefined,
+    propellant: debit && debit.ok ? debit.state : undefined,
+  };
+  broadcast('MANEUVER_EVENT', payload);
+  broadcast('CONSTRAINT_EVENT', { conjunction_id: conj.id, signal: report.signal, headline: report.headline, progress: report.progress });
 
-  return { status: conj.status, votes, duration_ms: delay };
+  return { ...payload, report };
 }
 
 // ---------------------------------------------------------------------------
@@ -773,6 +1409,10 @@ function computeConjunctions(catText, primaryNorads, opts = {}) {
       tle_age_days: +Math.max(ageA, ageB).toFixed(1),                    // older element set
       risk_index: Math.max(riskByRange, riskByPc),
       status: 'MONITORING',
+      // Provenance, recorded explicitly so FR-11 can evaluate rather than guess.
+      // This layer is our own SGP4 screening over public TLEs — which carry no
+      // covariance, so FR-11 will correctly flag it as screening-grade.
+      source: 'SGP4',
       sat1_pos: ecef(pa), sat2_pos: ecef(pb),
     };
   });
@@ -1010,7 +1650,23 @@ function planAvoidance(conj) {
     return best;
   };
   const origMiss = conj.min_range_km;
-  const SAFE_KM = Math.max(10, origMiss * 2.5);
+
+  // Target the PUBLISHED standard, not an arbitrary multiple.
+  //
+  // SSC 8.k requires post-maneuver collision probability to fall by at least
+  // 1.5 orders of magnitude. Under CelesTrak's maximum-probability method
+  // Pc ∝ 1/miss², so achieving N orders of reduction needs the miss distance to
+  // grow by 10^(N/2):
+  //
+  //     miss_required = miss_original × 10^(orders / 2)
+  //
+  // Before this, the planner aimed at `origMiss * 2.5`, which produced burns
+  // that were clear of the catalogue and looked fine on every displayed metric
+  // but silently failed the industry efficacy bar. FR-14 caught it; this closes
+  // the loop so the planner solves for the constraint rather than tripping over it.
+  const EFFICACY_FACTOR = Math.pow(10, FR.PC_REDUCTION_ORDERS / 2);   // ≈ 5.62×
+  const SAFE_KM = Math.max(10, origMiss * EFFICACY_FACTOR);
+
   let dv = null, newMiss = 0;
   for (let d = 0.02; d <= 8.0; d += 0.02) { const m = missForDv(d); if (m >= SAFE_KM) { dv = +d.toFixed(3); newMiss = +m.toFixed(3); break; } }
   if (dv === null) { dv = 8.0; newMiss = +missForDv(8.0).toFixed(3); }
@@ -1230,7 +1886,11 @@ async function getCdms() {
 async function getCatalogue() {
   try {
     const st = fs.statSync(CATALOGUE_FILE);
-    if (Date.now() - st.mtimeMs < CATALOGUE_TTL_MS) return fs.readFileSync(CATALOGUE_FILE, 'utf8');
+    if (Date.now() - st.mtimeMs < CATALOGUE_TTL_MS) {
+      const cached = fs.readFileSync(CATALOGUE_FILE, 'utf8');
+      if (!maneuverFlags.size) { try { updateEpochStore(cached); } catch {} }
+      return cached;
+    }
   } catch { /* missing — fetch below */ }
   if (catalogueFetching) {                       // a fetch is in-flight: serve stale if we have it
     try { return fs.readFileSync(CATALOGUE_FILE, 'utf8'); } catch { throw new Error('catalogue warming up'); }
@@ -1240,6 +1900,7 @@ async function getCatalogue() {
     const data = await fetchCatalogueFromSpaceTrack();
     try { fs.mkdirSync(CACHE_DIR, { recursive: true }); } catch {}
     fs.writeFileSync(CATALOGUE_FILE, data);
+    try { updateEpochStore(data); } catch (e) { console.log('[Maneuvers] epoch comparison skipped:', e.message); }
     console.log(`[Catalogue] fetched ${Math.round(data.length / 3) | 0} lines (~${Math.round(data.split('\n').length / 3)} objects) from Space-Track`);
     return data;
   } finally {
@@ -1276,7 +1937,7 @@ async function handleRequest(req, res) {
   }
 
   if (method === 'GET' && path === '/api/conjunctions') {
-    return json(res, 200, conjunctions);
+    return json(res, 200, conjunctions.map((c) => ({ ...c, constraint: constraintBadge(c) })));
   }
 
   if (method === 'GET' && path === '/api/cdms') {
@@ -1373,7 +2034,24 @@ async function handleRequest(req, res) {
     try {
       const plan = planAvoidance(conj);
       if (plan.error) return json(res, 422, plan);
-      return json(res, 200, plan);
+
+      // SSC 8.k requires the maneuver to reduce collision probability by at
+      // least 1.5 orders of magnitude. Compute both sides with the SAME method
+      // (CelesTrak's maximum-probability formula) so the ratio is meaningful.
+      plan.pc_before = Number.isFinite(conj.probability) ? conj.probability : conjMaxPc(plan.original_miss_km);
+      plan.pc_after = conjMaxPc(plan.new_miss_km);
+      plan.pc_orders_reduced = (plan.pc_before > 0 && plan.pc_after > 0)
+        ? +(Math.log10(plan.pc_before / plan.pc_after)).toFixed(2) : null;
+      plan.ssc_8k_target_orders = FR.PC_REDUCTION_ORDERS;
+
+      // Cache it: the constraint report upgrades out of UNRESOLVED once a plan
+      // exists, because the plan-dependent rules finally have their input.
+      planStore.set(conj.id, plan);
+      const report = constraintReport(conj);
+      conj.constraint = constraintBadge(conj);
+      broadcast('CONSTRAINT_EVENT', { conjunction_id: conj.id, signal: report.signal, headline: report.headline, progress: report.progress });
+
+      return json(res, 200, { ...plan, constraint: { signal: report.signal, headline: report.headline, progress: report.progress } });
     } catch (e) {
       return json(res, 500, { error: e.message });
     }
@@ -1385,30 +2063,716 @@ async function handleRequest(req, res) {
     if (!conj) return json(res, 404, { error: 'Conjunction not found' });
     if (conj.status === 'APPROVED') return json(res, 200, { status: 'APPROVED', message: 'Already approved' });
 
-    // Check leader
-    if (leaderId === null) return json(res, 503, { error: 'No leader elected — too many nodes offline' });
+    // ---- THE GATE ----
+    // The poll does not run unless the constraint work permits it. BLOCKED means
+    // a hard rule is violated; UNRESOLVED means a rule could not be evaluated,
+    // and not knowing is not the same as being allowed. Either way: 409, and the
+    // report says exactly what is outstanding.
+    const report = constraintReport(conj);
+    if (!report.authorised) {
+      return json(res, 409, {
+        error: report.signal === 'BLOCKED'
+          ? 'Authorisation refused — a hard flight rule is violated'
+          : 'Authorisation withheld — constraint work is incomplete',
+        signal: report.signal,
+        headline: report.headline,
+        blocking: report.blocking,
+        unevaluated: report.unevaluated,
+        next_actions: report.next_actions,
+        progress: report.progress,
+        conjunction_id: conj.id,
+      });
+    }
 
     const result = await runConsensus(conj);
     return json(res, 200, result);
   }
 
+  // ---- Constraint gate API ----
+
+  // The rulebook itself — every limit with the authority that set it.
+  if (method === 'GET' && path === '/api/constraints/rules') {
+    return json(res, 200, {
+      ...describeRulebook(activeRulebook()),
+      operator_postures: CV.postures(),
+      authored: authored.list(),
+    });
+  }
+
+  // Operator ephemeris feeds — and an honest report of what access we have.
+  if (method === 'GET' && path === '/api/operator-feeds') {
+    const st = await OPFEEDS.starlinkStatus();
+    return json(res, 200, {
+      feeds: [st],
+      reconciliation: {
+        disagreement_factor: OPFEEDS.DISAGREEMENT_FACTOR,
+        policy: 'When independent sources describe the same encounter and disagree by more than the threshold, we report UNRESOLVED. We do not average two disagreeing measurements — that manufactures a number neither source supports and hides exactly the uncertainty that matters.',
+      },
+    });
+  }
+
+  // ---- RULE AUTHORING: English -> validated rule -> TLA+ invariant ----
+  //
+  // Not an AI wrapper: the model's output is validated deterministically and
+  // interpreted from a data structure. There is no eval and no generated code,
+  // and the emitted TLA+ lets a model checker rule on the model's rule.
+
+  if (method === 'GET' && path === '/api/constraints/authored') {
+    return json(res, 200, {
+      authored: authored.list(),
+      allowed_fields: AUTHORING.FIELDS,
+      allowed_operators: Object.fromEntries(Object.entries(AUTHORING.OPS).map(([k, v]) => [k, v.label])),
+      safety: 'Authored rules are data, not code. They are interpreted through a fixed set of comparison primitives over an allow-listed set of context fields. No eval, no Function(), no arbitrary access.',
+    });
+  }
+
+  if (method === 'POST' && path === '/api/constraints/author') {
+    if (rateLimited(req, 10, 60000)) return json(res, 429, { error: 'Too many requests, slow down.' });
+    const body = await readBody(req);
+    const text = String(body.text || '').trim();
+    if (!text) return json(res, 400, { error: 'text required — state the constraint in plain English' });
+
+    const existingIds = activeRulebook().rules.map((r) => r.id);
+    let draft = body.draft || null;
+
+    // Compile with the LLM unless a pre-built draft was supplied (which is also
+    // how this is tested without a network round trip).
+    if (!draft) {
+      if (!GROQ_API_KEY) return json(res, 503, { error: 'GROQ_API_KEY not set — cannot compile natural language' });
+      try {
+        const raw = await groqOnce([
+          { role: 'system', content: AUTHORING.authoringPrompt(existingIds) },
+          { role: 'user', content: text },
+        ], 900);
+        const m = raw.match(/\{[\s\S]*\}/);
+        if (!m) return json(res, 422, { error: 'the model did not return a JSON rule', raw: raw.slice(0, 300) });
+        draft = JSON.parse(m[0]);
+      } catch (e) {
+        return json(res, 502, { error: 'rule compilation failed', detail: e.message });
+      }
+    }
+
+    // STAGE first, then verify. A structurally valid rule can still be
+    // semantically inverted — in testing, "never authorise when FEWER than three
+    // nodes are online" compiled to `online_nodes < 3`, which is exactly
+    // backwards. Structural validation cannot see that; probing can.
+    const staged = authored.add(draft, existingIds, { dryRun: true });
+    if (staged.ok && !body.skip_verification) {
+      try {
+        const verdictRaw = await groqOnce([
+          { role: 'system', content: 'You verify compiled operational rules. Reply with JSON only.' },
+          { role: 'user', content: AUTHORING.verificationPrompt(text, staged.rule, staged.probe) },
+        ], 500);
+        const vm = verdictRaw.match(/\{[\s\S]*\}/);
+        const verdict = vm ? JSON.parse(vm[0]) : null;
+        if (verdict && verdict.matches === false) {
+          return json(res, 422, {
+            error: 'the compiled rule does not match what you said',
+            reason: verdict.reason,
+            suggested_fix: verdict.suggested_fix || null,
+            compiled_as: staged.rule.requirement,
+            probe: staged.probe,
+            source_text: text,
+            note: 'Caught by semantic verification, not by structural validation. The rule was well-formed and still meant the opposite. It has NOT entered the rulebook.',
+          });
+        }
+      } catch (e) {
+        // A failed verification is not a pass. Refuse rather than admit an
+        // unverified rule into an authorisation system.
+        return json(res, 503, {
+          error: 'semantic verification unavailable — the rule was not admitted',
+          detail: e.message,
+          compiled_as: staged.rule.requirement,
+          probe: staged.probe,
+          note: 'An unverified rule is an unknown, and unknowns do not become rules.',
+        });
+      }
+    }
+
+    const result = authored.add(draft, existingIds);
+    if (!result.ok) {
+      return json(res, 422, {
+        error: result.model_declined
+          ? 'the model correctly declined: the constraint cannot be expressed with the available inputs'
+          : 'the compiled rule failed validation',
+        errors: result.errors,
+        draft,
+        note: 'The model proposes; the validator disposes. A rule that does not validate never enters the book.',
+      });
+    }
+
+    // Re-evaluate every event against the extended rulebook immediately.
+    const fleet = fleetSignal();
+    broadcast('CONSTRAINT_EVENT', { authored: result.rule.id, headline: `New rule ${result.rule.id}: ${result.rule.title}`, fleet_signal: fleet.signal });
+    broadcast('NETWORK_UPDATE', fullState());
+
+    return json(res, 200, {
+      rule: {
+        id: result.rule.id, key: result.rule.key, title: result.rule.title,
+        class: result.rule.class, waivable: result.rule.waivable,
+        authority: result.rule.authority, requirement: result.rule.requirement,
+        rationale: result.rule.rationale, spec: result.rule.spec,
+      },
+      tla_invariant: result.tla,
+      probe: result.probe,
+      source_text: text,
+      verification: body.skip_verification ? 'skipped' : 'passed — the compiled behaviour was probed and judged against the original wording',
+      rulebook_size: activeRulebook().rules.length,
+      fleet_signal: fleet,
+      note: 'The rule is live. Every event has been re-evaluated against it.',
+    });
+  }
+
+  const authDel = path.match(/^\/api\/constraints\/authored\/([A-Z]{2}-\d{1,3}[a-z]?)$/);
+  if (method === 'DELETE' && authDel) {
+    const ok = authored.remove(authDel[1]);
+    if (!ok) return json(res, 404, { error: 'no authored rule with that id' });
+    broadcast('NETWORK_UPDATE', fullState());
+    return json(res, 200, { removed: authDel[1], rulebook_size: activeRulebook().rules.length });
+  }
+
+  // The ML layer's own status — including what is ABSENT.
+  if (method === 'GET' && path === '/api/models') {
+    return json(res, 200, MODELS.status());
+  }
+
+  // ---- SOLAR FLARES: nowcast + forecast (the predictive layer) ----
+
+  if (method === 'GET' && path === '/api/flares') {
+    if (!flareState) {
+      return json(res, 503, {
+        error: 'X-ray feed unavailable',
+        note: 'Predictive rules report UNRESOLVED rather than assuming a quiet Sun.',
+      });
+    }
+    return json(res, 200, flareState);
+  }
+
+  // ---- THEME INDEPENDENCE ----
+  //
+  // The challenge statement requires the capability to "remain independent of
+  // any specific hackathon theme". This endpoint demonstrates that rather than
+  // asserting it: the SAME engine, the SAME four states, a rulebook about
+  // shipping software. Zero engine changes.
+
+  // -------------------------------------------------------------------------
+  // RECOURSE — the cheapest way out of a gate that is not COMPLETE.
+  //
+  // The signal says what state the work is in. This says what to DO about it,
+  // or that nothing can be done. Both answers matter: recommending
+  // measurements when a non-negotiable is violated would waste an operator's
+  // time on a gate that can never open.
+  // -------------------------------------------------------------------------
+  if (method === 'POST' && path === '/api/constraints/recourse') {
+    const body = await readBody(req);
+    const which = String(body.rulebook || 'orbital');
+    const pick = which === 'release'
+      ? { rulebook: releaseRulebook, supply: RELEASE_SUPPLY }
+      : { rulebook: maneuverRulebook, supply: ORBITAL_SUPPLY };
+    const r = RECOURSE.recourse({
+      rulebook: pick.rulebook,
+      context: body.context || {},
+      waivers: body.waivers || [],
+      supply: pick.supply,
+      now: Date.now(),
+    });
+    return json(res, 200, r);
+  }
+
+  // Recourse for a conjunction the gateway already knows about.
+  if (method === 'GET' && path.startsWith('/api/constraints/recourse/')) {
+    const id = Number(path.split('/').pop());
+    const conj = conjunctions.find((c) => c.id === id);
+    if (!conj) return json(res, 404, { error: 'unknown conjunction' });
+    const r = RECOURSE.recourse({
+      rulebook: maneuverRulebook,
+      context: constraintContext(conj),
+      supply: ORBITAL_SUPPLY,
+      now: Date.now(),
+    });
+    return json(res, 200, { conjunction_id: id, ...r });
+  }
+
+  // -------------------------------------------------------------------------
+  // RESOLVABILITY — is this bound achievable at this sample size, or at all?
+  //
+  // Two kinds of not-knowing that look identical in a UI and are completely
+  // different operationally: one is fixed by collecting more data (and we say
+  // how much), the other is impossible in principle (and we cite why).
+  // -------------------------------------------------------------------------
+  if (method === 'GET' && path === '/api/constraints/resolvability') {
+    const model = MODELS.load ? MODELS.load('conformal-screening') : null;
+    const buckets = [];
+    try {
+      const cm = require('./cache/models/conformal-screening.json');
+      const alpha = 1 - cm.coverage;
+      for (const [name, b] of Object.entries(cm.buckets)) {
+        buckets.push({ bucket: name, n: b.n, half_width_km: b.q95_km,
+          ...RESOLV.resolvability({ n: b.n, alpha, tol: 0.05 }) });
+      }
+      return json(res, 200, {
+        alpha, coverage_target: cm.coverage,
+        required_for_tolerance: {
+          '±10%': RESOLV.requiredSamples(alpha, 0.10).n_required,
+          '±5%': RESOLV.requiredSamples(alpha, 0.05).n_required,
+          '±2%': RESOLV.requiredSamples(alpha, 0.02).n_required,
+        },
+        minimum_n_for_any_finite_bound: Math.ceil(1 / alpha) - 1,
+        buckets,
+        conditional: RESOLV.resolvability({ n: 1e6, alpha, conditional: true }),
+        note: 'Realised coverage of a split-conformal bound is Beta(n+1-l, l) distributed, so how far actual coverage may drift from target is computable at any n. Below 1/alpha - 1 samples the interval is provably infinite.',
+      });
+    } catch (e) {
+      return json(res, 503, { error: 'conformal artefact unavailable', detail: e.message });
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // EVIDENCE-COVERAGE AUDIT — does each rulebook offer a route out of every
+  // rule it contains? Routes come in three kinds and they are different
+  // instructions: measure something, wait for time to pass, or act.
+  // -------------------------------------------------------------------------
+  if (method === 'GET' && path === '/api/constraints/audit') {
+    const books = {
+      orbital: maneuverRulebook,
+      reentry: reentryRulebook,
+      release: releaseRulebook,
+    };
+    const out = {};
+    for (const [k, rb] of Object.entries(books)) out[k] = RECOURSE.auditEvidenceCoverage(rb);
+    return json(res, 200, {
+      claim: 'A rule with no route out can go UNEVALUATED and leave the operator nothing to do. This checks every rulebook for that.',
+      rulebooks: out,
+    });
+  }
+
+  if (method === 'GET' && path === '/api/portability/rules') {
+    return json(res, 200, describeRulebook(releaseRulebook));
+  }
+
+  // -------------------------------------------------------------------------
+  // The theme-independence proof, now across THREE domains.
+  //
+  // Software release and aircraft dispatch have nothing in common with each
+  // other or with orbital mechanics, and the engine has never been told about
+  // any of them. The dispatch rulebook additionally carries deadlines, so it
+  // exercises the countdown machinery on a domain where the deadline is a
+  // regulated rectification interval rather than an element-set age.
+  // -------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // ONE EVENT, EVERY LAYER, IN ORDER.
+  //
+  // The system's depth was invisible: each layer worked and none of it was
+  // legible from the outside. This walks a single real event through the whole
+  // chain and returns it as an ordered narrative, every step naming a number
+  // and where the number came from.
+  // -------------------------------------------------------------------------
+  if (method === 'GET' && path.startsWith('/api/story/reentry')) {
+    const replay = parsed.searchParams.get('replay') || 'long_march_5b';
+    // Evidence the reader has chosen to acquire, so the chain can be re-run
+    // with it and the reader can watch an UNRESOLVED step change.
+    const acquired = (parsed.searchParams.get('acquire') || '')
+      .split(',').map((x) => x.trim()).filter(Boolean);
+    return json(res, 200, STORY.reentryStory({ replay, acquired, now: Date.now() }));
+  }
+
+  if (method === 'GET' && path === '/api/portability/dispatch') {
+    const now = Date.now();
+    const scenarios = Object.entries(DISPATCH.SCENARIOS).map(([id, sc]) => {
+      const ctx = DISPATCH.at(sc.context, now);
+      const report = CE.evaluate({ rulebook: DISPATCH.dispatchRulebook, context: ctx, now });
+      const h = HORIZON.horizon({ rulebook: DISPATCH.dispatchRulebook, context: ctx, now });
+      const rec = report.signal === 'COMPLETE' ? null : RECOURSE.recourse({
+        rulebook: DISPATCH.dispatchRulebook, context: ctx,
+        supply: DISPATCH.supplyEvidence, now,
+      });
+      return {
+        id, label: sc.label,
+        signal: report.signal, progress: report.progress, headline: report.headline,
+        grounds_in: h.self_blocks_in,
+        grounds_on: h.self_blocks_on,
+        recourse: rec && (rec.terminal
+          ? { terminal: true, why: rec.why, blockers: rec.blockers }
+          : rec.cheapest
+            ? { terminal: false, acquire: rec.cheapest.evidence, cost: rec.cheapest.cost_human,
+                verified_minimal: rec.minimality_proof && rec.minimality_proof.verified_minimal }
+            : { terminal: false, none: true, why: rec.why }),
+      };
+    });
+    return json(res, 200, {
+      claim: 'A regulated, non-software, non-space domain. Same engine, same four states, same precedence, zero changes.',
+      engine_changes_required: 0,
+      source: 'FAA Policy Letter PL-25 — MMEL repair categories A/B/C/D and the (M)/(O) provisos',
+      scope: 'An illustrative subset of the PL-25 structure, not an operator MEL and not approved by anybody. We are showing the engine is domain-free, not shipping a dispatch tool.',
+      rulebook: describeRulebook(DISPATCH.dispatchRulebook),
+      scenarios,
+      note: 'The Minimum Equipment List is natively four-state: dispatch permitted; permitted with a placard, a proviso and a repair deadline; no dispatch; or the item is not listed and therefore not classified. An industry arrived at these four independently, decades before we did.',
+    });
+  }
+
+  if (method === 'GET' && path === '/api/portability') {
+    const scenarios = Object.entries(RELEASE_SCENARIOS).map(([id, sc]) => {
+      const report = CE.evaluate({ rulebook: releaseRulebook, context: sc.context, now: Date.now() });
+      return {
+        id, label: sc.label,
+        signal: report.signal, progress: report.progress, headline: report.headline,
+        first: (report.blocking[0] || report.unevaluated[0] || report.advisory[0] || null),
+        counts: report.counts,
+      };
+    });
+    return json(res, 200, {
+      claim: 'The same constraint engine, the same four states, a domain with no space content.',
+      engine_changes_required: 0,
+      rulebook: describeRulebook(releaseRulebook),
+      scenarios,
+      note: 'The engine takes a rulebook and a context and returns a completion signal. It has never heard of a satellite, and it has never heard of a CVE either. Orbit is simply where we needed it first.',
+    });
+  }
+
+  // Evaluate an arbitrary release context against the software rulebook.
+  if (method === 'POST' && path === '/api/portability/evaluate') {
+    const body = await readBody(req);
+    const report = CE.evaluate({ rulebook: releaseRulebook, context: body.context || {}, waivers: body.waivers || [], now: Date.now() });
+    return json(res, 200, report);
+  }
+
+  // ---- THE RETURN LEG ----
+
+  // The re-entry rulebook itself, with citations.
+  if (method === 'GET' && path === '/api/deorbit/rules') {
+    return json(res, 200, describeRulebook(reentryRulebook));
+  }
+
+  // Plan a controlled deorbit and evaluate it against the rulebook.
+  if (method === 'POST' && path === '/api/deorbit/plan') {
+    const body = await readBody(req);
+    const norad = Number(body.norad);
+    if (!Number.isFinite(norad)) return json(res, 400, { error: 'norad required' });
+    try {
+      const plan = planDeorbit(norad, {
+        lead_minutes: body.lead_minutes,
+        coast_minutes: body.coast_minutes,
+        ballistic_coefficient: body.ballistic_coefficient,
+        recoverable: body.recoverable,
+        recovery: body.recovery,
+        burn_offset_s: body.burn_offset_s,
+      });
+      if (plan.error) return json(res, 422, plan);
+      const report = deorbitReport(plan);
+      broadcast('CONSTRAINT_EVENT', { deorbit: norad, signal: report.signal, headline: report.headline });
+      return json(res, 200, { plan, constraint: report });
+    } catch (e) {
+      return json(res, 500, { error: e.message });
+    }
+  }
+
+  // "What would fix it" — the minimum burn-epoch shift that clears the rulebook.
+  if (method === 'POST' && path === '/api/deorbit/retarget') {
+    const body = await readBody(req);
+    const norad = Number(body.norad);
+    if (!Number.isFinite(norad)) return json(res, 400, { error: 'norad required' });
+    try {
+      const out = retargetDeorbit(norad, { ballistic_coefficient: body.ballistic_coefficient, recoverable: body.recoverable });
+      if (out.error) return json(res, 422, out);
+      return json(res, 200, out);
+    } catch (e) {
+      return json(res, 500, { error: e.message });
+    }
+  }
+
+  // Full constraint report for a planned deorbit.
+  const deoMatch = path.match(/^\/api\/deorbit\/(\d+)$/);
+  if (method === 'GET' && deoMatch) {
+    const plan = deorbitStore.get(Number(deoMatch[1]));
+    if (!plan) return json(res, 404, { error: 'no deorbit planned for that object' });
+    return json(res, 200, { plan, constraint: deorbitReport(plan) });
+  }
+
+  // Historical re-entry replays — recorded events, not invented ones.
+  if (method === 'GET' && path === '/api/deorbit/replays') {
+    return json(res, 200, {
+      available: Object.keys(RE.REENTRY_REPLAYS),
+      replays: Object.values(RE.REENTRY_REPLAYS).map((r) => ({
+        id: r.id, title: r.title, summary: r.summary,
+        documented_effects: r.documented_effects, citations: r.citations, the_point: r.the_point,
+      })),
+    });
+  }
+
+  const rpMatch = path.match(/^\/api\/deorbit\/replay\/([a-z0-9_]+)$/);
+  if (method === 'GET' && rpMatch) {
+    const r = RE.reentryReplay(rpMatch[1]);
+    if (!r) return json(res, 404, { error: 'unknown replay', available: Object.keys(RE.REENTRY_REPLAYS) });
+    // Evaluate the recorded event against the live rulebook.
+    const ctx = {
+      reentry: { ...r, maritime: null, recoverable: false },
+      descent: null,                         // an uncontrolled re-entry was never screened
+      cluster: { online_nodes: nodes.filter((n) => n.online).length, total_nodes: nodes.length, leader_id: leaderId },
+      system: systemHealth(),
+      spaceWeather: spaceWeather ? { ...spaceWeather, flares: flareState } : null,
+      groundSegment,
+    };
+    const report = CE.evaluate({ rulebook: reentryRulebook, context: ctx, now: Date.now() });
+    return json(res, 200, { replay: r, constraint: report });
+  }
+
+  // The ground consequence raster's provenance and stated limitations.
+  // -------------------------------------------------------------------------
+  // THE DINOv3 GROUND, AS PIXELS.
+  //
+  // 18.2 million sub-cells were classified on an A100 and then never shown to
+  // anyone. This slices the 3.4 km land-cover grid for a bounding box so the
+  // globe can paint what the vision model actually sees under a corridor:
+  // water, sparse ground, built-up, and the cells it refuses to classify.
+  // -------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // THE WHOLE PLANET, AS THE MODEL SEES IT.
+  //
+  // The corridor strip shows the vision layer where it matters; this shows its
+  // reach. Every classified cell on Earth, downsampled 16x16 -> 4x4 by
+  // majority vote per block, so the full 18.2M sub-cells compress into a
+  // ~1.1M-pixel layer a browser draws once and keeps.
+  // -------------------------------------------------------------------------
+  if (method === 'GET' && path === '/api/ground/global') {
+    if (!global.__groundGlobal) {
+      let dense;
+      try { dense = require('./cache/dense-consequence.json'); }
+      catch { return json(res, 503, { error: 'dense-consequence.json not built' }); }
+      const G = dense.grid || 16, D = 4, B = G / D;
+      const cells = [];
+      for (const [key, g] of Object.entries(dense.cells)) {
+        const out = new Array(D * D);
+        for (let by = 0; by < D; by++) {
+          for (let bx = 0; bx < D; bx++) {
+            const counts = {};
+            for (let y = 0; y < B; y++) {
+              for (let x = 0; x < B; x++) {
+                const v = g[(by * B + y) * G + (bx * B + x)];
+                counts[v] = (counts[v] || 0) + 1;
+              }
+            }
+            out[by * D + bx] = Number(Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0]);
+          }
+        }
+        cells.push([Number(key), out]);
+      }
+      global.__groundGlobal = {
+        classes: dense.classes, grid: D, res_deg: 0.5, nx: 720,
+        model: dense.model,
+        accuracy: dense.accuracy ? dense.accuracy.patch_linear_vote : null,
+        cells,
+        note: 'majority vote per 4x4 block of the 3.4 km grid — coverage, not precision. The corridor strip keeps full resolution.',
+      };
+    }
+    return json(res, 200, global.__groundGlobal);
+  }
+
+  if (method === 'GET' && path === '/api/ground/dense') {
+    let dense;
+    try { dense = require('./cache/dense-consequence.json'); }
+    catch { return json(res, 503, { error: 'dense-consequence.json not built' }); }
+    const q = parsed.searchParams;
+    const w = Number(q.get('w')), sdeg = Number(q.get('s'));
+    const e = Number(q.get('e')), n = Number(q.get('n'));
+    if (![w, sdeg, e, n].every(Number.isFinite)) {
+      return json(res, 400, { error: 'need w,s,e,n bounding box in degrees' });
+    }
+    const RES = 0.5, NX = 720, G = dense.grid || 16;
+    const x0 = Math.max(0, Math.floor((w + 180) / RES));
+    const x1 = Math.min(NX - 1, Math.floor((e + 180) / RES));
+    const y0 = Math.max(0, Math.floor((90 - n) / RES));
+    const y1 = Math.min(359, Math.floor((90 - sdeg) / RES));
+    const cells = [];
+    for (let iy = y0; iy <= y1; iy++) {
+      for (let ix = x0; ix <= x1; ix++) {
+        const g = dense.cells[String(iy * NX + ix)];
+        if (g) cells.push({ ix, iy, g });
+      }
+    }
+    return json(res, 200, {
+      classes: dense.classes, grid: G, res_deg: RES,
+      sub_cell_km: dense.sub_cell_km,
+      accuracy: dense.accuracy ? dense.accuracy.patch_linear_vote : null,
+      model: dense.model,
+      bbox: { w, s: sdeg, e, n }, cells,
+      note: 'DINOv3-SAT patch classification at ~3.4 km. UNKNOWN is the model refusing, not a gap.',
+    });
+  }
+
+  if (method === 'GET' && path === '/api/deorbit/raster') {
+    const r = RE.loadRaster();
+    if (!r) return json(res, 503, { error: 'consequence raster not built — run node dev/constraints/build-consequence-raster.js' });
+    return json(res, 200, { version: r.version, built_at: r.built_at, resolution_deg: r.resolution_deg, classes: r.classes, stats: r.stats, sources: r.sources, limitations: r.limitations });
+  }
+
+  // Live space weather + the derived geospatial exposure zones.
+  if (method === 'GET' && path === '/api/spaceweather') {
+    if (!spaceWeather) {
+      return json(res, 503, {
+        error: 'space-weather feed unavailable',
+        note: 'Affected rules (FR-19, FR-21) report UNRESOLVED rather than assuming nominal conditions.',
+      });
+    }
+    return json(res, 200, {
+      conditions: spaceWeather,
+      zones: SW.zones(spaceWeather),
+      ground_segment: groundSegment,
+      replay: swReplay ? { id: swReplay.id, title: swReplay.title } : null,
+      honesty: 'These are EXPOSURE ZONES, not outage predictions. We state where a documented class of effect applies and cite why; we do not claim a specific station, grid or aircraft will fail.',
+    });
+  }
+
+  // Replay a recorded historical scenario, or return to live conditions.
+  if (method === 'POST' && path === '/api/spaceweather/replay') {
+    const body = await readBody(req);
+    const id = body.id ? String(body.id) : null;
+    if (id && !SW.REPLAYS[id]) return json(res, 404, { error: `unknown replay '${id}'`, available: Object.keys(SW.REPLAYS) });
+    const r = await setReplay(id);
+    const fleet = fleetSignal();
+    broadcast('NETWORK_UPDATE', fullState());
+    broadcast('CONSTRAINT_EVENT', { replay: id, fleet_signal: fleet.signal, headline: fleet.headline });
+    return json(res, 200, {
+      replay: id ? { id, title: r.title, summary: r.summary, documented_effects: r.documented_effects, citations: r.citations } : null,
+      conditions: spaceWeather,
+      ground_segment: groundSegment,
+      zones: SW.zones(spaceWeather),
+      fleet_signal: fleet,
+    });
+  }
+
+  // Fleet-level completion signal + the value-of-information ranking.
+  if (method === 'GET' && path === '/api/constraints/fleet') {
+    return json(res, 200, fleetSignal());
+  }
+
+  // Propellant ledger — the limit that cannot be argued with.
+  if (method === 'GET' && path === '/api/constraints/propellant') {
+    return json(res, 200, ledger.summary());
+  }
+
+  // Full report for one event.
+  const conMatch = path.match(/^\/api\/constraints\/(\d+)$/);
+  if (method === 'GET' && conMatch) {
+    const conj = conjunctions.find((c) => c.id === Number(conMatch[1]));
+    if (!conj) return json(res, 404, { error: 'Conjunction not found' });
+    return json(res, 200, { conjunction_id: conj.id, pair: `${conj.sat1_name} × ${conj.sat2_name}`, ...constraintReport(conj) });
+  }
+
+  // SSC 8.i — an involved operator acknowledges the notification.
+  const ackMatch = path.match(/^\/api\/constraints\/(\d+)\/acknowledge$/);
+  if (method === 'POST' && ackMatch) {
+    const conj = conjunctions.find((c) => c.id === Number(ackMatch[1]));
+    if (!conj) return json(res, 404, { error: 'Conjunction not found' });
+    const body = await readBody(req);
+    const who = String(body.operator || body.party || '').trim();
+    const state = notificationState(conj);
+    if (!who) return json(res, 400, { error: 'operator required' });
+    const row = state.parties.find((p) => p.operator.toLowerCase() === who.toLowerCase());
+    if (!row) return json(res, 404, { error: `${who} is not an involved operator for this event`, involved: state.parties.map((p) => p.operator) });
+    if (!row.acknowledged_at) { row.acknowledged_at = new Date().toISOString(); state.acknowledged += 1; }
+    const report = constraintReport(conj);
+    conj.constraint = constraintBadge(conj);
+    broadcast('CONSTRAINT_EVENT', { conjunction_id: conj.id, signal: report.signal, headline: report.headline, acknowledged_by: who });
+    return json(res, 200, { acknowledged_by: who, notifications: state, signal: report.signal, headline: report.headline });
+  }
+
+  // File a named waiver. Non-negotiable and unevaluated rules refuse it.
+  const waiveMatch = path.match(/^\/api\/constraints\/(\d+)\/waive$/);
+  if (method === 'POST' && waiveMatch) {
+    const conj = conjunctions.find((c) => c.id === Number(waiveMatch[1]));
+    if (!conj) return json(res, 404, { error: 'Conjunction not found' });
+    const body = await readBody(req);
+    const ruleId = String(body.rule_id || '').trim();
+    const party = String(body.party || body.operator || '').trim();
+    const reason = String(body.reason || '').trim();
+    if (!ruleId || !party || !reason) {
+      return json(res, 400, { error: 'rule_id, party and reason are all required — a waiver must have a name on it' });
+    }
+    const rule = activeRulebook().rules.find((r) => r.id === ruleId);
+    if (!rule) return json(res, 404, { error: `Unknown rule ${ruleId}` });
+    if (rule.waivable === false) {
+      return json(res, 409, {
+        error: `${ruleId} ${rule.title} is non-negotiable and cannot be waived`,
+        rule: { id: rule.id, title: rule.title, authority: rule.authority, rationale: rule.rationale },
+      });
+    }
+    const list = waiverStore.get(conj.id) || [];
+    list.push({ rule_id: ruleId, party, reason, ts: new Date().toISOString() });
+    waiverStore.set(conj.id, list);
+
+    const report = constraintReport(conj);
+    const row = report.rules.find((r) => r.id === ruleId);
+    // The engine may still refuse it — e.g. the rule was never evaluated.
+    if (row && row.waiver_rejected) {
+      return json(res, 409, { error: row.waiver_rejected, rule_id: ruleId, signal: report.signal, headline: report.headline });
+    }
+    conj.constraint = constraintBadge(conj);
+    broadcast('CONSTRAINT_EVENT', { conjunction_id: conj.id, signal: report.signal, headline: report.headline, waived: ruleId, party });
+    return json(res, 200, { waived: ruleId, party, signal: report.signal, headline: report.headline, report });
+  }
+
+  /**
+   * Emergency override.
+   *
+   * PREVIOUS BEHAVIOUR (a real bug, fixed here): this endpoint set
+   * `conj.status = 'APPROVED'` directly with ZERO actual votes, then fabricated
+   * unanimous YES from whichever nodes happened to be online — one node was
+   * enough. That contradicted the invariant formal/AstroMesh.tla proves:
+   *
+   *     Safety == conjStatus[c] = "APPROVED" => Cardinality(votes[c]) >= Quorum
+   *
+   * The TLA+ model had no Emergency action, so TLC never saw the violation.
+   *
+   * An emergency is a reason to accept known risk faster. It is not a reason to
+   * skip the poll, and it is not a reason to cross a non-negotiable line. So:
+   * auto-waive the WAIVABLE hard rules under a named declaration, refuse if a
+   * non-negotiable rule is violated or a rule is unevaluated, then run a real
+   * poll that still requires quorum.
+   */
   if (method === 'POST' && path === '/api/maneuver/emergency') {
     const body = await readBody(req);
     const conj = conjunctions.find(c => c.id === Number(body.conjunction_id));
     if (!conj) return json(res, 404, { error: 'Conjunction not found' });
 
-    conj.status = 'APPROVED';
-    broadcast('CONJUNCTION_ALERT', { conjunction: conj, emergency: true });
-    setTimeout(() => {
-      broadcast('MANEUVER_EVENT', {
-        conjunction_id: conj.id,
-        status: 'APPROVED',
-        trigger: 'EMERGENCY',
-        votes: nodes.filter(n => n.online).map(n => ({ node_id: n.id, node_name: n.name, vote: 'YES' })),
-        duration_ms: 0,
+    const declaredBy = String(body.party || body.operator || '').trim() || 'FLIGHT DIRECTOR';
+    const reason = String(body.reason || '').trim() || 'declared emergency';
+
+    const report = constraintReport(conj);
+    const em = CV.emergencyWaivers(report, { party: declaredBy, reason, ts: new Date().toISOString() });
+
+    if (!em.allowed) {
+      broadcast('CONSTRAINT_EVENT', {
+        conjunction_id: conj.id, signal: report.signal,
+        headline: 'EMERGENCY OVERRIDE REFUSED', emergency_refused: true,
       });
-    }, 100);
-    return json(res, 200, { status: 'APPROVED', trigger: 'EMERGENCY' });
+      return json(res, 409, {
+        error: 'Emergency override refused',
+        reason: em.reason,
+        refused_by: em.refused_by,
+        signal: report.signal,
+        headline: report.headline,
+        note: 'Non-negotiable rules have no override path, and an emergency is not evidence for a rule that was never evaluated.',
+        conjunction_id: conj.id,
+      });
+    }
+
+    broadcast('CONJUNCTION_ALERT', { conjunction: conj, emergency: true, declared_by: declaredBy });
+
+    // Waivers are recorded permanently — an emergency exception stays on the record.
+    const list = waiverStore.get(conj.id) || [];
+    list.push(...em.waivers);
+    waiverStore.set(conj.id, list);
+
+    // A real poll. Quorum still binds, and an operator may still refuse to
+    // accept another party's waiver.
+    const result = await runConsensus(conj);
+    return json(res, 200, {
+      ...result,
+      trigger: 'EMERGENCY',
+      declared_by: declaredBy,
+      auto_waived: em.waivers.map((w) => w.rule_id),
+      note: em.reason,
+    });
   }
 
   if (method === 'POST' && path === '/api/agent/toggle') {
@@ -1531,6 +2895,33 @@ server.listen(PORT, () => {
   console.log(`  Catalogue:        GET  /api/catalogue   (~31k objects, Space-Track)`);
   console.log(`  Health:           GET  /health`);
   console.log(`\nLeader: Node ${leaderId} (Bully — highest online ID)\n`);
+  // Space weather: fetch now, then every 5 minutes. A failure leaves the state
+  // null, which the rulebook reports as UNRESOLVED.
+  refreshSpaceWeather().then(() => {
+    if (spaceWeather) console.log(`[SpaceWeather] Kp ${spaceWeather.kp} (${spaceWeather.scale_g}) · ${groundSegment.stations_available}/${groundSegment.stations_assigned} ground stations reachable`);
+  });
+  setInterval(refreshSpaceWeather, 5 * 60 * 1000);
+
+  // Solar flares: GOES XRS updates every minute, so poll every 2 minutes. This
+  // is the predictive layer — it buys lead time on FR-19.
+  if (USE_SNAPSHOT) {
+    const m = SNAPSHOT.manifest();
+    const ageH = m ? ((Date.now() - Date.parse(m.captured_at)) / 3600000).toFixed(1) : '?';
+    console.log(`[Snapshot] SERVING FROZEN CAPTURE from ${m && m.captured_at} (${ageH} h old)`);
+    console.log('[Snapshot] All of it is real data captured live. FR-00 still audits its age and will block if stale.');
+  }
+
+  const ml = MODELS.loadAll();
+  console.log(`[Models] ${ml.found} artefact(s) loaded${ml.refused ? `, ${ml.refused} refused` : ''}${ml.found ? ': ' + ml.models.map((m) => m.name).join(', ') : ' — affected rules will report UNEVALUATED'}`);
+
+  refreshFlares().then(() => {
+    if (flareState) {
+      const f = flareState.forecast;
+      const n = flareState.nowcast;
+      console.log(`[Flares] ${n.count} flare(s) in the 6 h window${n.largest ? ` (largest ${n.largest.class})` : ''} · now ${f.current.class} · P(flare) ${f.probability}`);
+    }
+  });
+  setInterval(refreshFlares, 2 * 60 * 1000);
   // Warm the catalogue cache in the background (non-blocking) so the first
   // "Show all" toggle is instant.
   if (ST_IDENTITY && ST_PASSWORD) {
