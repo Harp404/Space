@@ -1,139 +1,113 @@
 # AstroMesh — narration
 
-*Read aloud. Nothing here is a stage direction — this is only what is spoken.*
-*Total: approximately 3 minutes at a measured pace.*
+*Spoken text only. Roughly two and a half minutes.*
+*Every claim below is visible on screen when it is said.*
 
 ---
 
-This is AstroMesh. It is a live orbital traffic system, screening thirty-one
-thousand tracked objects against the real catalogue for collisions.
+**[Boot / globe]**
 
-There is one thing I would like you to watch, and it is in the top left corner.
-It says: blocked. Not error — blocked. Something is outstanding, and this system
-will not authorise anything until it has been resolved.
+AstroMesh screens thirty-one thousand tracked objects against the real
+catalogue for collisions.
 
-That is the capability we built for this round. Every irreversible action here
-passes through a gate, and the gate answers in four states: complete, partial,
-blocked, or unresolved.
+Watch the top left. It says blocked. Not error — blocked. Something is
+outstanding, and nothing gets authorised until it is resolved.
 
----
-
-Here is a real conjunction — two objects on a converging pass. I am going to put
-it to the operator vote.
-
-The gate refused it.
-
-It has named its reasons. Flight Rule seven: at least one of the two objects
-must be commandable. Both of these are dead debris. Nobody can move either one,
-and no amount of agreement changes that.
-
-That rule is non-negotiable. There is no waiver path for it anywhere in the
-engine — not a permission we withheld, an absence of code. A unanimous yes from
-every operator on Earth could not override it.
-
-And these rows in grey are not failures. They are unresolved: rules the system
-could not evaluate at all. Most software treats missing data as no problem
-found. We treat it as blocking, because we don't know is a different answer from
-it's fine — and conflating those two is how accidents happen.
+Every irreversible action here passes a gate, and the gate answers in four
+states: complete, partial, blocked, unresolved.
 
 ---
 
-Now let me show you where a verdict comes from.
+**[Risk tab → VOTE]**
 
-This is the Long March 5B core stage, November 2022 — a twenty-tonne rocket
-body that came down uncontrolled and closed airspace over Spain and southern
-France.
+A real conjunction, put to the operator vote.
 
-Every step here states a number, and where that number came from.
+Refused — and the reasons are named. Flight Rule seven: at least one object
+must be commandable. Both of these are debris. Nobody can move either one.
 
-The corridor is this wide because of the live geomagnetic index from NOAA.
-Atmospheric density uncertainty is plus or minus forty-nine percent — measured
-from a thousand and forty-seven samples, not assumed. A solar storm widens this
-corridor. We do not choose to.
+That rule is non-negotiable. There is no waiver path in the engine — not a
+permission we withheld, an absence of code.
 
-What is underneath it comes from DINOv3, Meta's satellite vision model:
-eighteen million sub-cells at three-point-four kilometre resolution. We
-validated it against a population raster the model has never seen, and the
-correlation is zero point seven five. Above sixty degrees north it refuses to
-classify anything, because we measured that it fails there and encoded the
-refusal.
-
-The casualty expectancy for this footprint is twenty times over the legal limit.
-
-And here is the part I would ask you to sit with. The regulator's own tool
-computes that number against a population map that has been flattened into
-latitude bands. It cannot see which longitude the debris is heading for. Given
-the same footprint, it reports roughly half the risk.
-
-We measured that difference across eighteen thousand footprints. Over the
-densest ground on Earth, the standard method understates exposure ninety-four
-percent of the time.
+And these grey rows are not failures. They are unresolved: rules we could not
+evaluate. Most systems read missing data as no problem found. We treat it as
+blocking, because we don't know is a different answer from it's fine.
 
 ---
 
-This is the same descent, from the vehicle.
+**[How tab → corridor draws]**
 
-Altitude, flight path angle, downrange distance. The ground scrolling underneath
-is the vision model's classification — red is built up, blue is water, and grey
-is where the model declines to answer.
+Long March 5B, November 2022. A twenty-tonne stage that came down uncontrolled
+and closed airspace over Spain and southern France.
 
-To be precise about what you are watching: the corridor and the entry parameters
-are the recorded event. The motion along it is a kinematic replay. Nobody has
-telemetry from an uncontrolled tumbling rocket stage, and the caption on screen
-says exactly that.
+Every step names a number and its source.
 
----
+The corridor is this wide because of the live geomagnetic index. Density
+uncertainty, plus or minus forty-nine percent — measured, not assumed.
 
-May 2024. The Gannon storm — the largest satellite migration ever recorded,
-when roughly half of all objects in low Earth orbit manoeuvred within days.
+What is underneath comes from DINOv3, a satellite vision model: eighteen
+million cells at three-point-four kilometres. Validated against a population
+raster it never saw. Above sixty north it refuses to classify, because we
+measured that it fails there.
 
-Watch the whole planet. Over both poles, high frequency radio goes dead. The
-auroral ovals expand, and satellite navigation degrades inside them. Around the
-equator, a scintillation belt. Our ground stations drop from eight reachable to
-three.
+Casualty expectancy: twenty times over the legal limit.
 
-And that reaches directly into the rulebook. Flight Rule nineteen requires that
-the command uplink survives long enough to send the manoeuvre. The Sun has just
-shortened the window in which we can command a satellite, so the deadline to
-decide has moved.
-
-That is the whole argument in one event. A constraint is not a checkbox on a
-form. It is something the physical world can take away from you while you are
-deciding.
+And this line matters. The regulator's own method flattens population into
+latitude bands — it cannot see which longitude the debris is heading for. Same
+footprint, roughly half the risk. Across eighteen thousand footprints, it
+understates exposure ninety-four percent of the time over dense ground.
 
 ---
 
-This challenge asked for a capability that stays independent of any particular
-theme. So here is the identical engine — the same binary, with zero changes —
-running a software release gate. Test results, security vulnerabilities,
-rollback plans, error budgets.
+**[Follow descent]**
 
-And a third domain: aircraft dispatch, under the FAA's Minimum Equipment List.
-That system is natively four-state. An aircraft may dispatch; it may dispatch
-with a placard, a procedure, and a repair deadline; it may not dispatch; or the
-item is not listed and therefore not yet classified. An industry arrived at
-these four states decades before we did.
+The same descent, from the vehicle. Altitude, flight path angle, downrange.
 
-There is a test in the repository that asserts the engine contains no
-domain-specific vocabulary at all. The rules are data. Orbit is simply where we
-needed this first.
+The ground scrolling underneath is the vision model — red is built up, blue is
+water, grey is where it declines to answer.
+
+The corridor and entry parameters are the recorded event. The motion is a
+kinematic replay, and the caption says so.
 
 ---
 
-One last thing.
+**[Storms tab → Gannon]**
 
-That just screened every pair in the catalogue — approximately half a billion
-of them — as a compute shader running on this laptop's own graphics card. It is
-a coarse filter. Every candidate it finds is re-screened with full orbital
-propagation before anything acts on it. The verdict never comes from that pass,
-and the interface says so.
+May 2024, the Gannon storm. Half of everything in low Earth orbit manoeuvred
+within days.
+
+Radio dead over both poles. Navigation degraded inside the auroral ovals.
+Scintillation at the equator. Our ground stations drop from eight to three.
+
+And that reaches into the rulebook. Flight Rule nineteen needs the command
+uplink to survive. The Sun just shortened the window to command a satellite, so
+the deadline to decide moved.
+
+A constraint is not a checkbox. It is something the physical world can take
+away from you while you are deciding.
+
+---
+
+**[Prove it]**
+
+The challenge asked for this to stay theme-independent.
+
+Same engine, zero changes, running a software release gate — tests, CVEs,
+rollback plans, error budgets. Four states, same precedence.
+
+The rules are data. Orbit is where we needed it first.
+
+---
+
+**[GPU screen → close on the signal]**
+
+That just screened every pair in the catalogue — about half a billion — as a
+compute shader on this laptop's GPU. It is a coarse filter; candidates are
+re-screened with full propagation. The verdict never comes from it.
 
 Four states. Complete, partial, blocked, unresolved.
 
-Three of them are backed by something outside our own judgement: a model checker
-that explored a hundred and forty-eight thousand states, property tests across
-thousands of generated rulebooks, and finite-sample coverage theorems.
+The repository carries the proof: a model checker over a hundred and forty-eight
+thousand states, property tests across thousands of generated rulebooks, and
+coverage theorems for the bounds.
 
-And two of those are statements about what we cannot do.
-
-Thank you.
+Two of those results are about what we cannot do.
