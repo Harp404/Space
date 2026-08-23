@@ -182,6 +182,19 @@ const RELEASE_SUPPLY = require('./constraints/rulebooks/release-gate').supplyEvi
 const DISPATCH = require('./constraints/rulebooks/dispatch');
 const HORIZON = require('./constraints/horizon');
 const STORY = require('./constraints/story');
+const zlib = require('zlib');
+
+// The dense land-cover artefact ships gzipped (53 MB -> 2 MB). Loaded once.
+let __denseCache;
+function loadDenseCache() {
+  if (__denseCache !== undefined) return __denseCache;
+  const base = path.join(__dirname, 'cache', 'dense-consequence.json');
+  try { __denseCache = JSON.parse(fs.readFileSync(base, 'utf8')); return __denseCache; }
+  catch { /* try gz */ }
+  try { __denseCache = JSON.parse(zlib.gunzipSync(fs.readFileSync(base + '.gz')).toString('utf8')); }
+  catch { __denseCache = null; }
+  return __denseCache;
+}
 
 /**
  * Demo mode. SNAPSHOT=1 serves the frozen capture instead of hitting live APIs,
@@ -2535,9 +2548,8 @@ async function handleRequest(req, res) {
   // -------------------------------------------------------------------------
   if (method === 'GET' && path === '/api/ground/global') {
     if (!global.__groundGlobal) {
-      let dense;
-      try { dense = require('./cache/dense-consequence.json'); }
-      catch { return json(res, 503, { error: 'dense-consequence.json not built' }); }
+      const dense = loadDenseCache();
+      if (!dense) return json(res, 503, { error: 'dense-consequence.json not built' });
       const G = dense.grid || 16, D = 4, B = G / D;
       const cells = [];
       for (const [key, g] of Object.entries(dense.cells)) {
@@ -2568,9 +2580,8 @@ async function handleRequest(req, res) {
   }
 
   if (method === 'GET' && path === '/api/ground/dense') {
-    let dense;
-    try { dense = require('./cache/dense-consequence.json'); }
-    catch { return json(res, 503, { error: 'dense-consequence.json not built' }); }
+    const dense = loadDenseCache();
+    if (!dense) return json(res, 503, { error: 'dense-consequence.json not built' });
     const q = parsed.searchParams;
     const w = Number(q.get('w')), sdeg = Number(q.get('s'));
     const e = Number(q.get('e')), n = Number(q.get('n'));

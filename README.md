@@ -1,3 +1,14 @@
+---
+title: AstroMesh
+emoji: 🛰️
+colorFrom: indigo
+colorTo: blue
+sdk: docker
+app_port: 7860
+pinned: false
+short_description: Constraint-aware orbital traffic control — four-state completion signal
+---
+
 # 🛰️ AstroMesh
 
 ### Air-traffic-control for the orbital economy — autonomous, trustless, and provably safe.

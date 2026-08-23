@@ -36,6 +36,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const zlib = require('zlib');
 
 const NX = 720, RES = 0.5;
 
@@ -43,7 +44,12 @@ let dense;        // undefined = not tried, null = absent
 let shelter;
 
 function loadJson(rel) {
-  try { return JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'cache', rel), 'utf8')); }
+  // The dense artefact ships gzipped: 53 MB of repetitive class ids compress
+  // to 2 MB, which is the difference between fitting hosting platforms' file
+  // limits and not. Plain files still win if both exist.
+  const base = path.join(__dirname, '..', 'cache', rel);
+  try { return JSON.parse(fs.readFileSync(base, 'utf8')); } catch { /* try gz */ }
+  try { return JSON.parse(zlib.gunzipSync(fs.readFileSync(base + '.gz')).toString('utf8')); }
   catch { return null; }
 }
 

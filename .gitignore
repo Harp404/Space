@@ -90,3 +90,6 @@ formal/*.out
 # ── ML working data (large; scripts document their sources) ──
 ml/contradictions/
 ml/*.log
+
+# raw dense artefact stays local — the .gz ships (53 MB -> 2 MB, HF hard-limits plain files at 10 MB)
+dev/cache/dense-consequence.json
